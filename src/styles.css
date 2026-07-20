@@ -71,6 +71,9 @@
   --sidebar-accent-foreground: oklch(0.99 0 0);
   --oled: oklch(0.14 0.005 180);
   --oled-glow: oklch(0.85 0.24 145);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
 }
 
 @layer base {
