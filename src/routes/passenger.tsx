@@ -58,10 +58,11 @@ function PassengerPage() {
     if (!driver || !profile || !userId) return;
     setBusy(true);
     try {
-      const cat = CATEGORIES.find((c) => c.value === profile.category!)!;
+      const category = profile.category!;
+      const cat = CATEGORIES.find((c) => c.value === category)!;
       const vcode = Math.floor(10000 + Math.random() * 89999).toString();
       const { error } = await supabase.from("transactions").insert({
-        driver_id: driver.id, passenger_id: userId, category: profile.category, amount: cat.price, verification_code: vcode,
+        driver_id: driver.id, passenger_id: userId, category, amount: cat.price, verification_code: vcode,
       });
       if (error) throw error;
       const selfie = profile.selfie_url ? await getSignedUrl(supabase, "kyc-documents", profile.selfie_url) : null;
