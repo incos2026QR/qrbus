@@ -30,7 +30,7 @@ export function DriverRegister() {
   function autofill() {
     setS({
       phone: "7" + Math.floor(1000000 + Math.random() * 8999999),
-      password: "Driver123!",
+      password: "Password123!",
       email: `drv${Date.now()}@pagojusto.bo`,
       first_name: "Pedro",
       paternal_surname: "Choque",
@@ -48,7 +48,7 @@ export function DriverRegister() {
         qr_adulto: makeSampleImage("QR Adulto Bs 2.5", "#111827"),
       },
     });
-    toast.success("Datos de prueba cargados");
+    toast.success("Datos de prueba cargados (Contraseña: Password123!)");
   }
 
   async function submit(e: React.FormEvent) {
