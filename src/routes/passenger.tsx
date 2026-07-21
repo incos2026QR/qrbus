@@ -38,13 +38,13 @@ function PassengerPage() {
   async function findDriver() {
     setPass(null); setQrUrl(null); setComprobante(false);
     if (code.length < 3) return toast.error("Ingresa el código del chofer");
-    const { data } = await supabase.from("profiles").select("id, driver_code, first_name, paternal_surname, qr_general_url, qr_primaria_url, qr_secundaria_url, qr_adulto_url")
-      .eq("driver_code", code.toUpperCase()).eq("role", "driver").eq("status", "active").maybeSingle();
-    if (!data) return toast.error("Chofer no encontrado o no activo");
-    setDriver(data as DriverInfo);
+    const { data, error } = await supabase.rpc("find_driver_by_code", { _code: code.toUpperCase() });
+    const row = Array.isArray(data) ? (data[0] as DriverInfo | undefined) : (data as DriverInfo | null);
+    if (error || !row) return toast.error("Chofer no encontrado o no activo");
+    setDriver(row);
     if (!profile?.category) return toast.error("Tu categoría no está definida");
     const col = qrColumnFor(profile.category);
-    const path = (data as DriverInfo)[col];
+    const path = row[col];
     if (!path) return toast.error("El chofer no tiene QR para tu categoría");
     setQrUrl(await getSignedUrl(supabase, "qr-codes", path));
   }
