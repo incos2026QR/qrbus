@@ -30,7 +30,7 @@ export function DriverRegister() {
   function autofill() {
     setS({
       phone: "7" + Math.floor(1000000 + Math.random() * 8999999),
-      password: "Driver123!",
+      password: "Password123!",
       email: `drv${Date.now()}@pagojusto.bo`,
       first_name: "Pedro",
       paternal_surname: "Choque",
@@ -48,7 +48,7 @@ export function DriverRegister() {
         qr_adulto: makeSampleImage("QR Adulto Bs 2.5", "#111827"),
       },
     });
-    toast.success("Datos de prueba cargados");
+    toast.success("Datos de prueba cargados (Contraseña: Password123!)");
   }
 
   async function submit(e: React.FormEvent) {
@@ -96,6 +96,7 @@ export function DriverRegister() {
       <Button type="button" variant="outline" onClick={autofill} className="w-full border-primary text-primary">
         <Sparkles className="w-4 h-4 mr-2" /> Cargar Datos de Prueba
       </Button>
+      <p className="text-xs text-muted-foreground text-center -mt-2">(Contraseña: Password123!)</p>
       <div className="grid grid-cols-2 gap-2">
         <div><Label>Teléfono *</Label><Input value={s.phone} onChange={(e) => setS({...s, phone: e.target.value})} /></div>
         <div><Label>Contraseña *</Label><Input type="password" value={s.password} onChange={(e) => setS({...s, password: e.target.value})} /></div>

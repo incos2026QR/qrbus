@@ -26,21 +26,25 @@ export const seedAccounts = createServerFn({ method: "POST" }).handler(async () 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const accounts = [
     { email: "incos2026@gmail.com", password: "4Dmin-1234", role: "admin", first: "Master", surname: "Admin" },
-    { email: "supervisor1@pagojusto.bo", password: "Super1234!", role: "supervisor", first: "Supervisor", surname: "Uno" },
-    { email: "supervisor2@pagojusto.bo", password: "Super1234!", role: "supervisor", first: "Supervisor", surname: "Dos" },
-    { email: "supervisor3@pagojusto.bo", password: "Super1234!", role: "supervisor", first: "Supervisor", surname: "Tres" },
+    { email: "supervisor1@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Uno" },
+    { email: "supervisor2@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Dos" },
+    { email: "supervisor3@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Tres" },
   ] as const;
 
-  const results: { email: string; created: boolean }[] = [];
+  const results: { email: string; created: boolean; updated: boolean }[] = [];
   for (const acc of accounts) {
-    // Check if exists via profiles email
     const { data: existing } = await supabaseAdmin
       .from("profiles")
       .select("id")
       .eq("email", acc.email)
       .maybeSingle();
     if (existing) {
-      results.push({ email: acc.email, created: false });
+      // Reset password so demo credentials always work.
+      await supabaseAdmin.auth.admin.updateUserById(existing.id, {
+        password: acc.password,
+        email_confirm: true,
+      });
+      results.push({ email: acc.email, created: false, updated: true });
       continue;
     }
     const { data: user, error } = await supabaseAdmin.auth.admin.createUser({
@@ -49,7 +53,7 @@ export const seedAccounts = createServerFn({ method: "POST" }).handler(async () 
       email_confirm: true,
     });
     if (error || !user.user) {
-      results.push({ email: acc.email, created: false });
+      results.push({ email: acc.email, created: false, updated: false });
       continue;
     }
     await supabaseAdmin.from("profiles").insert({
@@ -61,7 +65,7 @@ export const seedAccounts = createServerFn({ method: "POST" }).handler(async () 
       email: acc.email,
     });
     await supabaseAdmin.from("user_roles").insert({ user_id: user.user.id, role: acc.role as "admin" | "supervisor" });
-    results.push({ email: acc.email, created: true });
+    results.push({ email: acc.email, created: true, updated: false });
   }
   return { results };
 });
@@ -73,7 +77,6 @@ export const generateDriverCode = createServerFn({ method: "POST" }).handler(asy
     const { data } = await supabaseAdmin.from("profiles").select("id").eq("driver_code", code).maybeSingle();
     if (!data) return { code };
   }
-  // fallback longer
   const code = "D" + Math.random().toString(36).slice(2, 6).toUpperCase();
   return { code };
 });

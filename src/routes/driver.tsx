@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { LogOut, Circle } from "lucide-react";
+import { LogOut, Circle, Flag } from "lucide-react";
 
 export const Route = createFileRoute("/driver")({ ssr: false, component: DriverPage });
 
@@ -68,9 +68,14 @@ function DriverPage() {
           <p className="text-xs uppercase text-muted-foreground">Chofer</p>
           <h1 className="font-bold">{profile.first_name} {profile.paternal_surname}</h1>
         </div>
-        <Button size="sm" variant="ghost" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
-          <LogOut className="w-4 h-4" />
-        </Button>
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" asChild>
+            <Link to="/reportes"><Flag className="w-4 h-4" /></Link>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
+            <LogOut className="w-4 h-4" />
+          </Button>
+        </div>
       </header>
 
       <Card className="p-6 text-center bg-gradient-to-br from-primary/10 to-accent">

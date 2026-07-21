@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { LogOut, Paperclip, Check, Loader2 } from "lucide-react";
+import { LogOut, Paperclip, Check, Loader2, Flag } from "lucide-react";
 
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
 
@@ -38,13 +38,13 @@ function PassengerPage() {
   async function findDriver() {
     setPass(null); setQrUrl(null); setComprobante(false);
     if (code.length < 3) return toast.error("Ingresa el código del chofer");
-    const { data } = await supabase.from("profiles").select("id, driver_code, first_name, paternal_surname, qr_general_url, qr_primaria_url, qr_secundaria_url, qr_adulto_url")
-      .eq("driver_code", code.toUpperCase()).eq("role", "driver").eq("status", "active").maybeSingle();
-    if (!data) return toast.error("Chofer no encontrado o no activo");
-    setDriver(data as DriverInfo);
+    const { data, error } = await supabase.rpc("find_driver_by_code", { _code: code.toUpperCase() });
+    const row = Array.isArray(data) ? (data[0] as DriverInfo | undefined) : (data as DriverInfo | null);
+    if (error || !row) return toast.error("Chofer no encontrado o no activo");
+    setDriver(row);
     if (!profile?.category) return toast.error("Tu categoría no está definida");
     const col = qrColumnFor(profile.category);
-    const path = (data as DriverInfo)[col];
+    const path = row[col];
     if (!path) return toast.error("El chofer no tiene QR para tu categoría");
     setQrUrl(await getSignedUrl(supabase, "qr-codes", path));
   }
@@ -110,9 +110,14 @@ function PassengerPage() {
           <h1 className="font-bold text-lg">Hola, {profile.first_name}</h1>
           <p className="text-xs text-muted-foreground">Pasajero activo</p>
         </div>
-        <Button size="sm" variant="ghost" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
-          <LogOut className="w-4 h-4" />
-        </Button>
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" asChild>
+            <Link to="/reportes"><Flag className="w-4 h-4" /></Link>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
+            <LogOut className="w-4 h-4" />
+          </Button>
+        </div>
       </header>
 
       <Card className="p-5 space-y-4">

@@ -3,12 +3,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Loader2, Sparkles, Upload, Check } from "lucide-react";
 import { signUpAutoConfirm } from "@/lib/auth.functions";
 import { uploadImage, makeSampleImage } from "@/lib/image";
-import { CATEGORIES, computeAge, validateCategoryForAge, type Category } from "@/lib/categories";
+import {
+  CATEGORY_LABELS, CATEGORY_PRICES,
+  computeAge, ageBucket, resolveCategory, type Category,
+} from "@/lib/categories";
+
+const DEMO_PASSWORD = "Password123!";
 
 type FormState = {
   step: 1 | 2 | 3 | 4;
@@ -20,19 +26,21 @@ type FormState = {
   maternal_surname: string;
   ci_number: string;
   birthdate: string;
-  category: Category;
+  chosen: Category;
+  hasDisability: boolean;
   files: {
     ci_front?: Blob;
     ci_back?: Blob;
     selfie?: Blob;
-    extra?: Blob;
+    university?: Blob;
+    disability?: Blob;
   };
 };
 
 const initial: FormState = {
   step: 1, phone: "", password: "", email: "",
   first_name: "", paternal_surname: "", maternal_surname: "", ci_number: "", birthdate: "",
-  category: "general", files: {},
+  chosen: "general", hasDisability: false, files: {},
 };
 
 export function PassengerRegister() {
@@ -43,21 +51,22 @@ export function PassengerRegister() {
     setS((p) => ({
       ...p,
       phone: "7" + Math.floor(1000000 + Math.random() * 8999999),
-      password: "Passenger123!",
+      password: DEMO_PASSWORD,
       email: `demo${Date.now()}@pagojusto.bo`,
       first_name: "Juan Carlos",
       paternal_surname: "Mamani",
       maternal_surname: "Quispe",
       ci_number: "" + Math.floor(1000000 + Math.random() * 8999999),
       birthdate: "1995-06-15",
-      category: "general",
+      chosen: "general",
+      hasDisability: false,
       files: {
         ci_front: makeSampleImage("CI Frontal"),
         ci_back: makeSampleImage("CI Reverso"),
         selfie: makeSampleImage("Selfie con CI", "#0891b2"),
       },
     }));
-    toast.success("Datos de prueba cargados");
+    toast.success(`Datos de prueba cargados (Contraseña: ${DEMO_PASSWORD})`);
   }
 
   function next() {
@@ -77,11 +86,15 @@ export function PassengerRegister() {
 
   async function submit() {
     const age = computeAge(s.birthdate);
-    const err = validateCategoryForAge(s.category, age);
-    if (err) return toast.error(err);
-    const cat = CATEGORIES.find((c) => c.value === s.category)!;
-    if (cat.requiresExtraDoc?.(age) && !s.files.extra) {
-      return toast.error(`Sube ${cat.extraDocLabel}`);
+    const bucket = ageBucket(age);
+    const chosen = bucket.forced ?? s.chosen;
+    const finalCategory = resolveCategory(age, chosen, s.hasDisability);
+
+    if (bucket.requiresUniversityDoc && chosen === "secundaria" && !s.files.university) {
+      return toast.error("Sube el Carnet Universitario/Estudiantil");
+    }
+    if (s.hasDisability && !s.files.disability) {
+      return toast.error("Sube el Carnet de Discapacidad");
     }
 
     setBusy(true);
@@ -95,8 +108,10 @@ export function PassengerRegister() {
       uploads.ci_front_url = await uploadImage(supabase, "kyc-documents", `${userId}/ci_front.jpg`, s.files.ci_front!);
       uploads.ci_back_url = await uploadImage(supabase, "kyc-documents", `${userId}/ci_back.jpg`, s.files.ci_back!);
       uploads.selfie_url = await uploadImage(supabase, "kyc-documents", `${userId}/selfie.jpg`, s.files.selfie!);
-      if (s.files.extra) {
-        uploads.extra_doc_url = await uploadImage(supabase, "kyc-documents", `${userId}/extra.jpg`, s.files.extra);
+      // extra_doc_url stores the disability card if present; otherwise university ID.
+      const extra = s.files.disability ?? s.files.university;
+      if (extra) {
+        uploads.extra_doc_url = await uploadImage(supabase, "kyc-documents", `${userId}/extra.jpg`, extra);
       }
 
       const { error: profErr } = await supabase.from("profiles").insert({
@@ -110,7 +125,7 @@ export function PassengerRegister() {
         birthdate: s.birthdate,
         phone: s.phone,
         email,
-        category: s.category,
+        category: finalCategory,
         ...uploads,
       });
       if (profErr) throw profErr;
@@ -122,10 +137,13 @@ export function PassengerRegister() {
   }
 
   return (
-    <div className="space-y-4">
-      <Button type="button" variant="outline" onClick={autofill} className="w-full border-primary text-primary">
-        <Sparkles className="w-4 h-4 mr-2" /> Cargar Datos de Prueba
-      </Button>
+    <div className="space-y-4 max-w-full">
+      <div>
+        <Button type="button" variant="outline" onClick={autofill} className="w-full border-primary text-primary">
+          <Sparkles className="w-4 h-4 mr-2" /> Cargar Datos de Prueba
+        </Button>
+        <p className="text-xs text-muted-foreground text-center mt-1">(Contraseña: {DEMO_PASSWORD})</p>
+      </div>
       <div className="flex gap-1">
         {[1,2,3,4].map((i) => (
           <div key={i} className={`h-1.5 flex-1 rounded ${s.step >= i ? "bg-primary" : "bg-muted"}`} />
@@ -176,25 +194,54 @@ export function PassengerRegister() {
 
 function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
   const age = s.birthdate ? computeAge(s.birthdate) : 0;
-  const cat = CATEGORIES.find((c) => c.value === s.category)!;
-  const err = s.birthdate ? validateCategoryForAge(s.category, age) : null;
-  const needsExtra = s.birthdate && cat.requiresExtraDoc?.(age);
+  const bucket = ageBucket(age);
+  const chosen = bucket.forced ?? s.chosen;
+  const finalCategory = resolveCategory(age, chosen, s.hasDisability);
+
   return (
     <div className="space-y-3">
       <h3 className="font-semibold">Paso 4: Categoría de tarifa</h3>
       <p className="text-xs text-muted-foreground">Edad calculada: <strong>{age}</strong> años</p>
-      <Select value={s.category} onValueChange={(v) => setS({...s, category: v as Category})}>
-        <SelectTrigger><SelectValue /></SelectTrigger>
-        <SelectContent>
-          {CATEGORIES.map((c) => (
-            <SelectItem key={c.value} value={c.value}>{c.label} — Bs {c.price.toFixed(2)}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {err && <p className="text-sm text-destructive">{err}</p>}
-      {needsExtra && (
-        <FilePick label={`${cat.extraDocLabel} *`} file={s.files.extra} onFile={(f) => setS({...s, files: {...s.files, extra: f}})} />
+
+      {bucket.forced ? (
+        <div className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
+          Asignación automática: <strong>{CATEGORY_LABELS[bucket.forced]}</strong> — Bs {CATEGORY_PRICES[bucket.forced].toFixed(2)}
+        </div>
+      ) : (
+        <>
+          <Label>Selecciona tu categoría</Label>
+          <Select value={s.chosen} onValueChange={(v) => setS({...s, chosen: v as Category})}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {bucket.options.map((c) => (
+                <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]} — Bs {CATEGORY_PRICES[c].toFixed(2)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {bucket.requiresUniversityDoc && chosen === "secundaria" && (
+            <FilePick label="Carnet Universitario/Estudiantil *"
+              file={s.files.university}
+              onFile={(f) => setS({...s, files: {...s.files, university: f}})} />
+          )}
+        </>
       )}
+
+      <div className="flex items-center justify-between rounded-md border p-3 mt-2">
+        <div>
+          <Label>¿Tienes carnet de discapacidad?</Label>
+          <p className="text-xs text-muted-foreground">Se aplicará automáticamente la tarifa más baja disponible.</p>
+        </div>
+        <Switch checked={s.hasDisability} onCheckedChange={(v) => setS({...s, hasDisability: v})} />
+      </div>
+      {s.hasDisability && (
+        <FilePick label="Carnet de Discapacidad *"
+          file={s.files.disability}
+          onFile={(f) => setS({...s, files: {...s.files, disability: f}})} />
+      )}
+
+      <div className="rounded-md bg-accent/40 p-3 text-sm">
+        Tarifa final asignada: <strong>{CATEGORY_LABELS[finalCategory]}</strong> — <strong>Bs {CATEGORY_PRICES[finalCategory].toFixed(2)}</strong>
+      </div>
     </div>
   );
 }

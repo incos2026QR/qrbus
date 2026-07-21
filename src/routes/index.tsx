@@ -23,12 +23,9 @@ function LoginPage() {
   const { profile, userId, loading } = useSession();
   const [seeded, setSeeded] = useState(false);
 
-  // Auto-seed on first load (idempotent)
   useEffect(() => {
     if (seeded) return;
-    seedAccounts()
-      .then(() => setSeeded(true))
-      .catch(() => setSeeded(true));
+    seedAccounts().then(() => setSeeded(true)).catch(() => setSeeded(true));
   }, [seeded]);
 
   useEffect(() => {
@@ -50,7 +47,7 @@ function LoginPage() {
           <p className="text-sm text-muted-foreground mt-1">Pago justo con validación instantánea</p>
         </div>
 
-        <Card className="p-6">
+        <Card className="p-4 sm:p-6 max-w-full overflow-hidden">
           <Tabs defaultValue="login">
             <TabsList className="grid grid-cols-3 w-full">
               <TabsTrigger value="login"><LogIn className="w-4 h-4 mr-1" /> Login</TabsTrigger>
@@ -62,10 +59,6 @@ function LoginPage() {
             <TabsContent value="driver" className="mt-4"><DriverRegister /></TabsContent>
           </Tabs>
         </Card>
-
-        <p className="text-xs text-center text-muted-foreground mt-4">
-          Cuentas pre-cargadas: admin (incos2026@gmail.com / 4Dmin-1234), supervisor1..3@pagojusto.bo / Super1234!
-        </p>
       </div>
     </main>
   );
@@ -81,15 +74,11 @@ function LoginForm() {
     setBusy(true);
     try {
       let email = identifier.trim();
-      // If looks like a phone (no @), lookup email by phone
       if (!email.includes("@")) {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("email")
-          .eq("phone", email)
-          .maybeSingle();
-        if (!prof?.email) throw new Error("Teléfono no registrado");
-        email = prof.email;
+        const { data, error } = await supabase.rpc("lookup_email_by_phone", { _phone: email });
+        if (error) throw error;
+        if (!data) throw new Error("Teléfono no registrado");
+        email = data as string;
       }
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;

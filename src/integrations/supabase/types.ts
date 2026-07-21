@@ -89,6 +89,51 @@ export type Database = {
         }
         Relationships: []
       }
+      reports: {
+        Row: {
+          admin_notes: string | null
+          category: string
+          created_at: string
+          description: string
+          driver_code: string | null
+          id: string
+          reported_user_id: string | null
+          reporter_id: string
+          resolver_id: string | null
+          status: string
+          transaction_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          admin_notes?: string | null
+          category: string
+          created_at?: string
+          description: string
+          driver_code?: string | null
+          id?: string
+          reported_user_id?: string | null
+          reporter_id: string
+          resolver_id?: string | null
+          status?: string
+          transaction_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          admin_notes?: string | null
+          category?: string
+          created_at?: string
+          description?: string
+          driver_code?: string | null
+          id?: string
+          reported_user_id?: string | null
+          reporter_id?: string
+          resolver_id?: string | null
+          status?: string
+          transaction_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       transactions: {
         Row: {
           amount: number
@@ -142,6 +187,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      find_driver_by_code: {
+        Args: { _code: string }
+        Returns: {
+          driver_code: string
+          first_name: string
+          id: string
+          paternal_surname: string
+          qr_adulto_url: string
+          qr_general_url: string
+          qr_primaria_url: string
+          qr_secundaria_url: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -149,6 +207,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      lookup_email_by_phone: { Args: { _phone: string }; Returns: string }
     }
     Enums: {
       app_role: "admin" | "supervisor" | "passenger" | "driver"

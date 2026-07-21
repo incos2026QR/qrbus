@@ -1,32 +1,39 @@
 export type Category = "general" | "primaria" | "secundaria" | "adulto_mayor" | "discapacidad";
 
+export const CATEGORY_LABELS: Record<Category, string> = {
+  general: "General",
+  primaria: "Estudiantil (Escolar)",
+  secundaria: "Estudiante Universitario",
+  adulto_mayor: "Adulto Mayor",
+  discapacidad: "Persona con Discapacidad",
+};
+
+export const CATEGORY_PRICES: Record<Category, number> = {
+  general: 3.0,
+  primaria: 1.0,
+  secundaria: 2.0,
+  adulto_mayor: 2.5,
+  discapacidad: 2.5,
+};
+
+// Legacy shape kept for admin overrides / display
 export const CATEGORIES: {
   value: Category;
   label: string;
   price: number;
-  minAge?: number;
-  maxAge?: number;
   requiresExtraDoc?: (age: number) => boolean;
   extraDocLabel?: string;
-}[] = [
-  { value: "general", label: "General", price: 3.0 },
-  { value: "primaria", label: "Estudiante Primaria", price: 1.0, maxAge: 12 },
-  {
-    value: "secundaria",
-    label: "Secundaria y Universitario",
-    price: 2.0,
-    requiresExtraDoc: (age) => age >= 18,
-    extraDocLabel: "Carnet Universitario/Estudiantil",
-  },
-  { value: "adulto_mayor", label: "Adulto Mayor", price: 2.5, minAge: 60 },
-  {
-    value: "discapacidad",
-    label: "Persona con Discapacidad",
-    price: 2.5,
-    requiresExtraDoc: () => true,
-    extraDocLabel: "Carnet de Discapacidad",
-  },
-];
+}[] = (Object.keys(CATEGORY_LABELS) as Category[]).map((v) => ({
+  value: v,
+  label: CATEGORY_LABELS[v],
+  price: CATEGORY_PRICES[v],
+  requiresExtraDoc:
+    v === "secundaria" ? (age: number) => age >= 18 :
+    v === "discapacidad" ? () => true : undefined,
+  extraDocLabel:
+    v === "secundaria" ? "Carnet Universitario/Estudiantil" :
+    v === "discapacidad" ? "Carnet de Discapacidad" : undefined,
+}));
 
 export function computeAge(birthdate: string): number {
   const b = new Date(birthdate);
@@ -37,11 +44,32 @@ export function computeAge(birthdate: string): number {
   return age;
 }
 
-export function validateCategoryForAge(category: Category, age: number): string | null {
-  const c = CATEGORIES.find((x) => x.value === category)!;
-  if (c.maxAge !== undefined && age > c.maxAge) return `Máximo ${c.maxAge} años para ${c.label}`;
-  if (c.minAge !== undefined && age < c.minAge) return `Mínimo ${c.minAge} años para ${c.label}`;
-  return null;
+/**
+ * Smart selection by age. Returns:
+ *  - forced: category is fixed by age (no user choice)
+ *  - options: allowed categories (excluding disability, handled separately)
+ *  - requiresUniversityDoc: if user picks "secundaria" in 18-27, they must upload student ID
+ */
+export function ageBucket(age: number): {
+  forced?: Category;
+  options: Category[];
+  requiresUniversityDoc?: boolean;
+} {
+  if (age < 18) return { forced: "primaria", options: ["primaria"] };
+  if (age >= 60) return { forced: "adulto_mayor", options: ["adulto_mayor"] };
+  if (age <= 27) return { options: ["secundaria", "general"], requiresUniversityDoc: true };
+  return { options: ["general"] };
+}
+
+/**
+ * Resolve final category considering disability. Always picks the cheapest fare.
+ */
+export function resolveCategory(age: number, chosen: Category, hasDisability: boolean): Category {
+  const bucket = ageBucket(age);
+  const base: Category = bucket.forced ?? chosen ?? bucket.options[0];
+  if (!hasDisability) return base;
+  // Compare base fare vs discapacidad (2.5) and pick the cheapest for passenger.
+  return CATEGORY_PRICES[base] <= CATEGORY_PRICES.discapacidad ? base : "discapacidad";
 }
 
 export function qrColumnFor(category: Category): "qr_general_url" | "qr_primaria_url" | "qr_secundaria_url" | "qr_adulto_url" {
@@ -52,4 +80,12 @@ export function qrColumnFor(category: Category): "qr_general_url" | "qr_primaria
     case "discapacidad": return "qr_adulto_url";
     default: return "qr_general_url";
   }
+}
+
+// Kept for backward compatibility with the admin override select
+export function validateCategoryForAge(category: Category, age: number): string | null {
+  if (category === "primaria" && age > 17) return "Estudiantil solo hasta 17 años";
+  if (category === "adulto_mayor" && age < 60) return "Adulto Mayor requiere 60+";
+  if (category === "secundaria" && (age < 18 || age > 27)) return "Universitario entre 18 y 27";
+  return null;
 }
