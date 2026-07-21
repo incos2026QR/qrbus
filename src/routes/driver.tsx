@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { LogOut, Circle } from "lucide-react";
+import { LogOut, Circle, Flag } from "lucide-react";
 
 export const Route = createFileRoute("/driver")({ ssr: false, component: DriverPage });
 

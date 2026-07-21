@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { LogOut, Paperclip, Check, Loader2 } from "lucide-react";
+import { LogOut, Paperclip, Check, Loader2, Flag } from "lucide-react";
 
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
 
