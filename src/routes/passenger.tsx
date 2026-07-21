@@ -110,9 +110,14 @@ function PassengerPage() {
           <h1 className="font-bold text-lg">Hola, {profile.first_name}</h1>
           <p className="text-xs text-muted-foreground">Pasajero activo</p>
         </div>
-        <Button size="sm" variant="ghost" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
-          <LogOut className="w-4 h-4" />
-        </Button>
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" asChild>
+            <Link to="/reportes"><Flag className="w-4 h-4" /></Link>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
+            <LogOut className="w-4 h-4" />
+          </Button>
+        </div>
       </header>
 
       <Card className="p-5 space-y-4">
