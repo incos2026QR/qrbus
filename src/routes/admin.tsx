@@ -7,17 +7,24 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { LogOut, Users, Bus, Shield, BarChart3, CheckCircle2, XCircle, Ban, ArrowUp } from "lucide-react";
+import { LogOut, Users, Bus, Shield, BarChart3, CheckCircle2, XCircle, Ban, ArrowUp, Menu } from "lucide-react";
 import { grantRole } from "@/lib/auth.functions";
+import { CATEGORY_LABELS, CATEGORY_PRICES, type Category } from "@/lib/categories";
 
 export const Route = createFileRoute("/admin")({ ssr: false, component: AdminPage });
+
+type Tab = "drivers" | "passengers" | "supervisors" | "reports";
 
 function AdminPage() {
   const { profile, loading, refresh } = useSession();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"drivers" | "passengers" | "supervisors" | "reports">("drivers");
+  const [tab, setTab] = useState<Tab>("drivers");
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -28,28 +35,54 @@ function AdminPage() {
   if (loading || !profile) return <div className="p-8">Cargando...</div>;
   const isAdmin = profile.role === "admin";
 
+  const nav = (
+    <>
+      <NavBtn active={tab === "drivers"} onClick={() => { setTab("drivers"); setDrawerOpen(false); }} icon={<Bus className="w-4 h-4" />}>Choferes</NavBtn>
+      <NavBtn active={tab === "passengers"} onClick={() => { setTab("passengers"); setDrawerOpen(false); }} icon={<Users className="w-4 h-4" />}>Pasajeros</NavBtn>
+      {isAdmin && <NavBtn active={tab === "supervisors"} onClick={() => { setTab("supervisors"); setDrawerOpen(false); }} icon={<Shield className="w-4 h-4" />}>Supervisores</NavBtn>}
+      <NavBtn active={tab === "reports"} onClick={() => { setTab("reports"); setDrawerOpen(false); }} icon={<BarChart3 className="w-4 h-4" />}>Reportes</NavBtn>
+    </>
+  );
+
+  const brandBlock = (
+    <div className="p-4 border-b border-white/10">
+      <div className="font-bold text-lg">QR Pago Justo</div>
+      <div className="text-xs opacity-70">{isAdmin ? "Administrador" : "Supervisor"}</div>
+    </div>
+  );
+
+  const signOut = (
+    <button onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}
+      className="w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-white/10 text-sm">
+      <LogOut className="w-4 h-4" /> Cerrar sesión
+    </button>
+  );
+
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-60 bg-sidebar text-sidebar-foreground flex flex-col">
-        <div className="p-4 border-b border-white/10">
-          <div className="font-bold text-lg">QR Pago Justo</div>
-          <div className="text-xs opacity-70">{isAdmin ? "Administrador" : "Supervisor"}</div>
-        </div>
-        <nav className="flex-1 p-2 space-y-1">
-          <NavBtn active={tab === "drivers"} onClick={() => setTab("drivers")} icon={<Bus className="w-4 h-4" />}>Choferes</NavBtn>
-          <NavBtn active={tab === "passengers"} onClick={() => setTab("passengers")} icon={<Users className="w-4 h-4" />}>Pasajeros</NavBtn>
-          {isAdmin && <NavBtn active={tab === "supervisors"} onClick={() => setTab("supervisors")} icon={<Shield className="w-4 h-4" />}>Supervisores</NavBtn>}
-          <NavBtn active={tab === "reports"} onClick={() => setTab("reports")} icon={<BarChart3 className="w-4 h-4" />}>Reportes</NavBtn>
-        </nav>
-        <div className="p-2 border-t border-white/10">
-          <button onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-white/10 text-sm">
-            <LogOut className="w-4 h-4" /> Cerrar sesión
-          </button>
-        </div>
+    <div className="min-h-screen md:flex">
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex w-60 bg-sidebar text-sidebar-foreground flex-col">
+        {brandBlock}
+        <nav className="flex-1 p-2 space-y-1">{nav}</nav>
+        <div className="p-2 border-t border-white/10">{signOut}</div>
       </aside>
 
-      <main className="flex-1 p-6 bg-background overflow-auto">
+      {/* Mobile top bar */}
+      <div className="md:hidden flex items-center justify-between p-3 bg-sidebar text-sidebar-foreground">
+        <div className="font-bold">QR Pago Justo</div>
+        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <SheetTrigger asChild>
+            <Button size="icon" variant="ghost" className="text-sidebar-foreground"><Menu className="w-5 h-5" /></Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="p-0 bg-sidebar text-sidebar-foreground w-64">
+            {brandBlock}
+            <nav className="flex-1 p-2 space-y-1">{nav}</nav>
+            <div className="p-2 border-t border-white/10">{signOut}</div>
+          </SheetContent>
+        </Sheet>
+      </div>
+
+      <main className="flex-1 p-4 sm:p-6 bg-background overflow-auto max-w-full">
         {tab === "drivers" && <UserTable role="driver" onChange={refresh} />}
         {tab === "passengers" && <UserTable role="passenger" onChange={refresh} />}
         {tab === "supervisors" && isAdmin && <UserTable role="supervisor" onChange={refresh} allowPromote={false} />}
@@ -71,6 +104,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
   const [subtab, setSubtab] = useState<"pending" | "active">("pending");
   const [rows, setRows] = useState<Profile[]>([]);
   const [selected, setSelected] = useState<Profile | null>(null);
+  const [overrideCategory, setOverrideCategory] = useState<Category | "">("");
 
   async function load() {
     const { data } = await supabase.from("profiles").select("*").eq("role", role).order("created_at", { ascending: false });
@@ -78,10 +112,27 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
   }
   useEffect(() => { load(); }, [role]);
 
+  useEffect(() => {
+    setOverrideCategory((selected?.category as Category | null) ?? "");
+  }, [selected]);
+
   const filtered = rows.filter((r) => subtab === "pending" ? r.status === "pending" : r.status !== "pending");
 
+  async function saveCategory() {
+    if (!selected || !overrideCategory) return;
+    const { error } = await supabase.from("profiles").update({ category: overrideCategory }).eq("id", selected.id);
+    if (error) return toast.error(error.message);
+    toast.success("Categoría actualizada");
+    load();
+  }
+
   async function updateStatus(id: string, status: Profile["status"]) {
-    const { error } = await supabase.from("profiles").update({ status }).eq("id", id);
+    // Save category override alongside status changes if it differs
+    const updates: Partial<Profile> = { status };
+    if (selected && overrideCategory && overrideCategory !== selected.category) {
+      updates.category = overrideCategory;
+    }
+    const { error } = await supabase.from("profiles").update(updates).eq("id", id);
     if (error) return toast.error(error.message);
     toast.success("Estado actualizado");
     setSelected(null);
@@ -95,7 +146,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
   }
 
   return (
-    <Card className="p-4">
+    <Card className="p-4 max-w-full overflow-hidden">
       <h2 className="text-xl font-bold capitalize mb-3">{role === "driver" ? "Choferes" : role === "passenger" ? "Pasajeros" : "Supervisores"}</h2>
       <Tabs value={subtab} onValueChange={(v) => setSubtab(v as "pending" | "active")}>
         <TabsList>
@@ -104,11 +155,11 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
         </TabsList>
         <TabsContent value={subtab} className="mt-3">
           {filtered.length === 0 && <p className="text-sm text-muted-foreground p-4">Sin registros.</p>}
-          <div className="divide-y">
+          <div className="divide-y overflow-x-auto">
             {filtered.map((r) => (
-              <div key={r.id} className="py-3 flex items-center gap-3">
+              <div key={r.id} className="py-3 flex items-center gap-3 min-w-0">
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium">{r.first_name} {r.paternal_surname}</div>
+                  <div className="font-medium truncate">{r.first_name} {r.paternal_surname}</div>
                   <div className="text-xs text-muted-foreground truncate">
                     CI: {r.ci_number} · {r.phone} {r.driver_code && `· Código: ${r.driver_code}`}
                   </div>
@@ -122,7 +173,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
       </Tabs>
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto w-[95vw]">
           <DialogHeader><DialogTitle>Revisión KYC</DialogTitle></DialogHeader>
           {selected && (
             <div className="space-y-4">
@@ -130,10 +181,30 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                 <p><strong>Nombre:</strong> {selected.first_name} {selected.paternal_surname} {selected.maternal_surname}</p>
                 <p><strong>CI:</strong> {selected.ci_number} · <strong>Nacimiento:</strong> {selected.birthdate}</p>
                 <p><strong>Teléfono:</strong> {selected.phone} · <strong>Email:</strong> {selected.email}</p>
-                {selected.category && <p><strong>Categoría:</strong> {selected.category}</p>}
                 {selected.driver_code && <p><strong>Código chofer:</strong> {selected.driver_code}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+
+              {selected.role === "passenger" && (
+                <div className="rounded-md border p-3 space-y-2">
+                  <p className="text-sm font-semibold">Modificar categoría de tarifa</p>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Select value={overrideCategory} onValueChange={(v) => setOverrideCategory(v as Category)}>
+                      <SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => (
+                          <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]} — Bs {CATEGORY_PRICES[c].toFixed(2)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button variant="secondary" onClick={saveCategory} disabled={!overrideCategory || overrideCategory === selected.category}>
+                      Guardar categoría
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Actual: {selected.category ? CATEGORY_LABELS[selected.category as Category] : "—"}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <ImagePreview label="CI Frontal" path={selected.ci_front_url} bucket="kyc-documents" />
                 <ImagePreview label="CI Reverso" path={selected.ci_back_url} bucket="kyc-documents" />
                 <ImagePreview label="Selfie" path={selected.selfie_url} bucket="kyc-documents" />
@@ -141,7 +212,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                 {selected.extra_doc_url && <ImagePreview label="Documento adicional" path={selected.extra_doc_url} bucket="kyc-documents" />}
               </div>
               {selected.role === "driver" && (
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t">
                   <ImagePreview label="QR General" path={selected.qr_general_url} bucket="qr-codes" />
                   <ImagePreview label="QR Primaria" path={selected.qr_primaria_url} bucket="qr-codes" />
                   <ImagePreview label="QR Secundaria" path={selected.qr_secundaria_url} bucket="qr-codes" />
@@ -186,34 +257,143 @@ function ImagePreview({ label, path, bucket }: { label: string; path: string | n
   return (
     <div>
       <p className="text-xs font-medium mb-1">{label}</p>
-      {url ? <img src={url} alt={label} className="w-full h-40 object-cover rounded border" />
-           : <div className="w-full h-40 bg-muted rounded border flex items-center justify-center text-xs text-muted-foreground">Sin imagen</div>}
+      {url ? <img src={url} alt={label} className="w-full h-40 object-cover rounded border" /> :
+       <div className="w-full h-40 rounded border bg-muted flex items-center justify-center text-xs text-muted-foreground">Sin imagen</div>}
     </div>
   );
 }
 
+type ReportRow = {
+  id: string;
+  reporter_id: string;
+  category: string;
+  description: string;
+  driver_code: string | null;
+  transaction_id: string | null;
+  reported_user_id: string | null;
+  status: string;
+  admin_notes: string | null;
+  created_at: string;
+};
+
+const REPORT_CATEGORY_LABELS: Record<string, string> = {
+  tarifa_incorrecta: "Cobro incorrecto",
+  mala_conducta: "Mala conducta",
+  bug_app: "Error en la app",
+  otro: "Otro",
+};
+
 function ReportsPanel() {
-  const [rows, setRows] = useState<{ amount: number; category: string; created_at: string }[]>([]);
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [selected, setSelected] = useState<ReportRow | null>(null);
+  const [notes, setNotes] = useState("");
+  const [reporterProfile, setReporterProfile] = useState<Profile | null>(null);
+  const [reportedProfile, setReportedProfile] = useState<Profile | null>(null);
+
+  async function load() {
+    const { data } = await supabase.from("reports").select("*").order("created_at", { ascending: false }).limit(100);
+    setRows((data as ReportRow[]) ?? []);
+  }
+  useEffect(() => { load(); }, []);
+
   useEffect(() => {
-    supabase.from("transactions").select("amount, category, created_at").order("created_at", { ascending: false }).limit(200)
-      .then(({ data }) => setRows((data as { amount: number; category: string; created_at: string }[]) ?? []));
-  }, []);
-  const total = rows.reduce((s, r) => s + Number(r.amount), 0);
+    setNotes(selected?.admin_notes ?? "");
+    setReporterProfile(null); setReportedProfile(null);
+    if (!selected) return;
+    supabase.from("profiles").select("*").eq("id", selected.reporter_id).maybeSingle()
+      .then(({ data }) => setReporterProfile(data as Profile | null));
+    if (selected.driver_code) {
+      supabase.from("profiles").select("*").eq("driver_code", selected.driver_code).maybeSingle()
+        .then(({ data }) => setReportedProfile(data as Profile | null));
+    }
+  }, [selected]);
+
+  async function updateReport(status: string) {
+    if (!selected) return;
+    const { error } = await supabase.from("reports").update({ status, admin_notes: notes }).eq("id", selected.id);
+    if (error) return toast.error(error.message);
+    toast.success("Reporte actualizado");
+    setSelected(null); load();
+  }
+
+  async function suspendUser(id: string) {
+    const { error } = await supabase.from("profiles").update({ status: "suspended" }).eq("id", id);
+    if (error) return toast.error(error.message);
+    toast.success("Usuario suspendido");
+  }
+
   return (
-    <Card className="p-4 space-y-4">
-      <h2 className="text-xl font-bold">Reportes / Transacciones</h2>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg border p-4"><div className="text-xs text-muted-foreground">Transacciones</div><div className="text-2xl font-bold">{rows.length}</div></div>
-        <div className="rounded-lg border p-4"><div className="text-xs text-muted-foreground">Total Bs</div><div className="text-2xl font-bold">{total.toFixed(2)}</div></div>
-      </div>
-      <div className="divide-y text-sm">
-        {rows.map((r, i) => (
-          <div key={i} className="py-2 flex justify-between">
-            <span>{r.category}</span><span>Bs {Number(r.amount).toFixed(2)}</span>
-            <span className="text-muted-foreground">{new Date(r.created_at).toLocaleString()}</span>
+    <Card className="p-4 max-w-full overflow-hidden">
+      <h2 className="text-xl font-bold mb-3">Reportes de usuarios</h2>
+      {rows.length === 0 && <p className="text-sm text-muted-foreground">No hay reportes.</p>}
+      <div className="divide-y overflow-x-auto">
+        {rows.map((r) => (
+          <div key={r.id} className="py-3 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="font-medium truncate">{REPORT_CATEGORY_LABELS[r.category] ?? r.category}</div>
+              <div className="text-xs text-muted-foreground truncate">
+                {new Date(r.created_at).toLocaleString()} {r.driver_code && `· Chofer: ${r.driver_code}`}
+              </div>
+              <p className="text-sm truncate">{r.description}</p>
+            </div>
+            <Badge variant={r.status === "open" ? "destructive" : r.status === "resolved" ? "default" : "secondary"}>{r.status}</Badge>
+            <Button size="sm" variant="outline" onClick={() => setSelected(r)}>Ver</Button>
           </div>
         ))}
       </div>
+
+      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto w-[95vw]">
+          <DialogHeader><DialogTitle>Detalle del reporte</DialogTitle></DialogHeader>
+          {selected && (
+            <div className="space-y-3 text-sm">
+              <div>
+                <p><strong>Categoría:</strong> {REPORT_CATEGORY_LABELS[selected.category] ?? selected.category}</p>
+                <p><strong>Fecha:</strong> {new Date(selected.created_at).toLocaleString()}</p>
+                <p><strong>Estado:</strong> {selected.status}</p>
+                {selected.driver_code && <p><strong>Código chofer:</strong> {selected.driver_code}</p>}
+                {selected.transaction_id && <p><strong>Transacción:</strong> {selected.transaction_id}</p>}
+              </div>
+              <div>
+                <p className="font-semibold">Descripción</p>
+                <p className="whitespace-pre-wrap">{selected.description}</p>
+              </div>
+
+              {reporterProfile && (
+                <div className="rounded border p-2">
+                  <p className="text-xs uppercase text-muted-foreground">Reportado por</p>
+                  <p><strong>{reporterProfile.first_name} {reporterProfile.paternal_surname}</strong> ({reporterProfile.role})</p>
+                  <p className="text-xs">{reporterProfile.email} · {reporterProfile.phone}</p>
+                  <Button size="sm" variant="destructive" className="mt-2" onClick={() => suspendUser(reporterProfile.id)}>
+                    <Ban className="w-3 h-3 mr-1" /> Suspender reportante
+                  </Button>
+                </div>
+              )}
+              {reportedProfile && (
+                <div className="rounded border p-2">
+                  <p className="text-xs uppercase text-muted-foreground">Chofer reportado</p>
+                  <p><strong>{reportedProfile.first_name} {reportedProfile.paternal_surname}</strong> — {reportedProfile.driver_code}</p>
+                  <p className="text-xs">{reportedProfile.email} · {reportedProfile.phone}</p>
+                  <Button size="sm" variant="destructive" className="mt-2" onClick={() => suspendUser(reportedProfile.id)}>
+                    <Ban className="w-3 h-3 mr-1" /> Suspender chofer
+                  </Button>
+                </div>
+              )}
+
+              <div>
+                <p className="font-semibold">Notas del administrador</p>
+                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => updateReport("reviewing")} variant="secondary">En revisión</Button>
+                <Button onClick={() => updateReport("resolved")} className="bg-success text-success-foreground">Resuelto</Button>
+                <Button onClick={() => updateReport("dismissed")} variant="outline">Descartar</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
