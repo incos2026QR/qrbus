@@ -3,31 +3,52 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
-import { qrColumnFor, CATEGORIES } from "@/lib/categories";
+import { CATEGORY_LABELS, CATEGORY_PRICES, type Category } from "@/lib/categories";
+import { playSuccessChime } from "@/lib/sound";
+import { QrScanner } from "@/components/QrScanner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { LogOut, Paperclip, Check, Loader2, Flag } from "lucide-react";
+import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard } from "lucide-react";
+import QRCode from "qrcode";
 
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
 
 type DriverInfo = {
-  id: string; driver_code: string; first_name: string | null; paternal_surname: string | null;
-  qr_general_url: string | null; qr_primaria_url: string | null; qr_secundaria_url: string | null; qr_adulto_url: string | null;
+  id: string;
+  driver_code: string;
+  first_name: string | null;
+  paternal_surname: string | null;
 };
 
+const GENERAL_PRICE = CATEGORY_PRICES.general;
+
 function PassengerPage() {
-  const { profile, userId, loading } = useSession();
+  const { profile, userId, loading, refresh } = useSession();
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
-  const [qrUrl, setQrUrl] = useState<string | null>(null);
-  const [comprobante, setComprobante] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [pass, setPass] = useState<{ vcode: string; selfieUrl: string | null } | null>(null);
+  const [tickets, setTickets] = useState(1);
+  const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pass, setPass] = useState<{
+    vcode: string;
+    selfieUrl: string | null;
+    base: number;
+    extra: number;
+    total: number;
+    tickets: number;
+    category: Category;
+  } | null>(null);
+
+  // Top-up modal
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [topupAmount, setTopupAmount] = useState("20");
+  const [topupQr, setTopupQr] = useState<string | null>(null);
+  const [topupBusy, setTopupBusy] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -35,40 +56,71 @@ function PassengerPage() {
     else if (profile.role !== "passenger") navigate({ to: "/" });
   }, [loading, profile, userId, navigate]);
 
-  async function findDriver() {
-    setPass(null); setQrUrl(null); setComprobante(false);
-    if (code.length < 3) return toast.error("Ingresa el código del chofer");
-    const { data, error } = await supabase.rpc("find_driver_by_code", { _code: code.toUpperCase() });
+  useEffect(() => {
+    if (!topupOpen) return;
+    QRCode.toDataURL(`pagojusto://topup?amount=${topupAmount}`, { width: 260, margin: 1 })
+      .then(setTopupQr)
+      .catch(() => setTopupQr(null));
+  }, [topupOpen, topupAmount]);
+
+  const balance = Number(profile?.balance ?? 0);
+  const basePrice = profile?.category ? CATEGORY_PRICES[profile.category] : GENERAL_PRICE;
+  const total = basePrice + (tickets - 1) * GENERAL_PRICE;
+
+  async function findDriver(rawCode: string) {
+    const clean = rawCode.trim().toUpperCase().replace(/^.*[/:]/, "");
+    if (clean.length < 3) return toast.error("Código de chofer inválido");
+    const { data, error } = await supabase.rpc("find_driver_by_code", { _code: clean });
     const row = Array.isArray(data) ? (data[0] as DriverInfo | undefined) : (data as DriverInfo | null);
     if (error || !row) return toast.error("Chofer no encontrado o no activo");
+    setCode(clean);
+    setTickets(1);
     setDriver(row);
-    if (!profile?.category) return toast.error("Tu categoría no está definida");
-    const col = qrColumnFor(profile.category);
-    const path = row[col];
-    if (!path) return toast.error("El chofer no tiene QR para tu categoría");
-    setQrUrl(await getSignedUrl(supabase, "qr-codes", path));
   }
 
-  function simulateUpload() {
-    setUploading(true);
-    setTimeout(() => { setUploading(false); setComprobante(true); toast.success("Comprobante adjuntado correctamente ✓"); }, 900);
+  async function doTopup() {
+    const amount = Number(topupAmount);
+    if (!Number.isFinite(amount) || amount <= 0) return toast.error("Monto inválido");
+    setTopupBusy(true);
+    try {
+      const { error } = await supabase.rpc("topup_wallet", { _amount: amount, _method: "qr" });
+      if (error) throw error;
+      await refresh();
+      playSuccessChime();
+      toast.success(`Saldo cargado: Bs ${amount.toFixed(2)}`);
+      setTopupOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al cargar saldo");
+    } finally {
+      setTopupBusy(false);
+    }
   }
 
   async function confirmPayment() {
-    if (!driver || !profile || !userId) return;
+    if (!driver || !profile) return;
     setBusy(true);
     try {
-      const category = profile.category!;
-      const cat = CATEGORIES.find((c) => c.value === category)!;
-      const vcode = Math.floor(10000 + Math.random() * 89999).toString();
-      const { error } = await supabase.from("transactions").insert({
-        driver_id: driver.id, passenger_id: userId, category, amount: cat.price, verification_code: vcode,
-      });
+      const { data, error } = await supabase.rpc("pay_fare", { _driver_code: driver.driver_code, _tickets: tickets });
       if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) throw new Error("No se pudo procesar el pago");
       const selfie = profile.selfie_url ? await getSignedUrl(supabase, "kyc-documents", profile.selfie_url) : null;
-      setPass({ vcode, selfieUrl: selfie });
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Error"); }
-    finally { setBusy(false); }
+      playSuccessChime();
+      setPass({
+        vcode: row.verification_code,
+        selfieUrl: selfie,
+        base: Number(row.base_amount),
+        extra: Number(row.extra_amount),
+        total: Number(row.total),
+        tickets,
+        category: row.category as Category,
+      });
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (loading || !profile) return <div className="p-8">Cargando...</div>;
@@ -89,15 +141,37 @@ function PassengerPage() {
 
   if (pass) {
     return (
-      <div className="fixed inset-0 bg-background flex flex-col items-center justify-center p-6">
+      <div className="fixed inset-0 bg-background flex flex-col items-center justify-center p-6 overflow-auto">
         <div className="text-center max-w-sm w-full">
           <p className="text-sm text-muted-foreground uppercase tracking-widest">Código de Validación</p>
           <div className="text-7xl font-black text-success my-4 tracking-widest tabular-nums">{pass.vcode}</div>
           {pass.selfieUrl && (
-            <img src={pass.selfieUrl} alt="Selfie" className="w-40 h-40 object-cover rounded-full mx-auto border-4 border-primary shadow-lg" />
+            <img src={pass.selfieUrl} alt="Selfie del pasajero" className="w-40 h-40 object-cover rounded-full mx-auto border-4 border-primary shadow-lg" />
           )}
+          <Card className="mt-5 p-4 text-left text-sm space-y-1">
+            <div className="flex justify-between">
+              <span>1 {CATEGORY_LABELS[pass.category]}</span>
+              <span>Bs {pass.base.toFixed(2)}</span>
+            </div>
+            {pass.tickets > 1 && (
+              <div className="flex justify-between">
+                <span>{pass.tickets - 1} General</span>
+                <span>Bs {pass.extra.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold border-t pt-1">
+              <span>Total ({pass.tickets} pasaje{pass.tickets > 1 ? "s" : ""})</span>
+              <span>Bs {pass.total.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-muted-foreground">
+              <span>Saldo restante</span>
+              <span>Bs {balance.toFixed(2)}</span>
+            </div>
+          </Card>
           <p className="mt-4 text-sm text-muted-foreground">Muestra este código al chofer para validar el pago.</p>
-          <Button className="mt-6 w-full" variant="outline" onClick={() => { setPass(null); setDriver(null); setCode(""); }}>Nueva validación</Button>
+          <Button className="mt-5 w-full" variant="outline" onClick={() => { setPass(null); setDriver(null); setCode(""); setTickets(1); }}>
+            Nueva validación
+          </Button>
         </div>
       </div>
     );
@@ -120,31 +194,102 @@ function PassengerPage() {
         </div>
       </header>
 
-      <Card className="p-5 space-y-4">
-        <div>
-          <Label>Código del chofer (5 caracteres)</Label>
-          <div className="flex gap-2 mt-1">
-            <Input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="DRV84" className="text-center text-2xl font-bold tracking-widest uppercase" />
-            <Button onClick={findDriver}>Buscar</Button>
-          </div>
+      {/* Virtual wallet */}
+      <Card className="p-5 bg-gradient-to-br from-primary/15 to-accent">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+          <Wallet className="w-4 h-4" /> Saldo Pago Justo
         </div>
-
-        {driver && qrUrl && (
-          <div className="space-y-3 pt-2 border-t">
-            <p className="text-sm">Chofer: <strong>{driver.first_name} {driver.paternal_surname}</strong></p>
-            <div className="bg-white p-4 rounded-lg border">
-              <img src={qrUrl} alt="QR Pago" className="w-full max-w-xs mx-auto" />
-              <p className="text-center text-xs text-muted-foreground mt-2">Escanea con tu app bancaria</p>
+        <div className="text-4xl font-black my-2">Bs {balance.toFixed(2)}</div>
+        <Dialog open={topupOpen} onOpenChange={setTopupOpen}>
+          <DialogTrigger asChild>
+            <Button className="w-full"><Plus className="w-4 h-4 mr-2" /> Cargar Saldo</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-full sm:max-w-sm">
+            <DialogHeader><DialogTitle>Cargar saldo</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label>Monto (Bs)</Label>
+                <Input type="number" min={1} step="0.5" value={topupAmount} onChange={(e) => setTopupAmount(e.target.value)} />
+              </div>
+              <div className="flex gap-2">
+                {[10, 20, 50].map((v) => (
+                  <Button key={v} type="button" size="sm" variant="outline" className="flex-1" onClick={() => setTopupAmount(String(v))}>
+                    Bs {v}
+                  </Button>
+                ))}
+              </div>
+              <div className="bg-white rounded-lg border p-3 text-center">
+                {topupQr ? <img src={topupQr} alt="QR de recarga" className="mx-auto w-44 h-44" /> : <QrCode className="w-24 h-24 mx-auto text-muted-foreground" />}
+                <p className="text-xs text-muted-foreground mt-2">Escanea con Yape / Tigo Money / Banca Móvil</p>
+              </div>
+              <Button className="w-full" onClick={doTopup} disabled={topupBusy}>
+                {topupBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Simular pago y acreditar
+              </Button>
             </div>
-            <Button variant="outline" className="w-full" onClick={simulateUpload} disabled={uploading || comprobante}>
-              {uploading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Subiendo...</> :
-               comprobante ? <><Check className="w-4 h-4 mr-2 text-success" /> Comprobante adjuntado ✓</> :
-               <><Paperclip className="w-4 h-4 mr-2" /> Adjuntar comprobante de pago (Opcional)</>}
-            </Button>
-            <Button onClick={confirmPayment} disabled={busy} className="w-full h-12 text-base">
+          </DialogContent>
+        </Dialog>
+      </Card>
+
+      <Card className="p-5 space-y-4 mt-4">
+        {!driver && (
+          <>
+            {scanning ? (
+              <QrScanner
+                onResult={(text) => { setScanning(false); findDriver(text); }}
+                onCancel={() => setScanning(false)}
+              />
+            ) : (
+              <Button className="w-full h-14 text-base" onClick={() => setScanning(true)}>
+                <ScanLine className="w-5 h-5 mr-2" /> Escanear QR del chofer
+              </Button>
+            )}
+            <div className="pt-2 border-t">
+              <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Keyboard className="w-3 h-3" /> O ingresa el código manualmente
+              </Label>
+              <div className="flex gap-2 mt-1">
+                <Input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  maxLength={6}
+                  placeholder="DRV84"
+                  className="text-center text-2xl font-bold tracking-widest uppercase"
+                />
+                <Button variant="secondary" onClick={() => findDriver(code)}>Buscar</Button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {driver && (
+          <div className="space-y-4">
+            <p className="text-sm">Chofer: <strong>{driver.first_name} {driver.paternal_surname}</strong> ({driver.driver_code})</p>
+
+            <div className="rounded-lg border p-4">
+              <p className="text-xs text-muted-foreground text-center mb-2">Cantidad de pasajes</p>
+              <div className="flex items-center justify-center gap-5">
+                <Button size="icon" variant="outline" onClick={() => setTickets((t) => Math.max(1, t - 1))} aria-label="Quitar pasaje">
+                  <Minus className="w-4 h-4" />
+                </Button>
+                <div className="text-2xl font-bold w-28 text-center">{tickets} Pasaje{tickets > 1 ? "s" : ""}</div>
+                <Button size="icon" variant="outline" onClick={() => setTickets((t) => Math.min(10, t + 1))} aria-label="Agregar pasaje">
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
+              <div className="mt-3 text-sm space-y-1">
+                <div className="flex justify-between"><span>1 {profile.category ? CATEGORY_LABELS[profile.category] : "General"}</span><span>Bs {basePrice.toFixed(2)}</span></div>
+                {tickets > 1 && <div className="flex justify-between"><span>{tickets - 1} General</span><span>Bs {((tickets - 1) * GENERAL_PRICE).toFixed(2)}</span></div>}
+                <div className="flex justify-between font-bold border-t pt-1"><span>Total</span><span>Bs {total.toFixed(2)}</span></div>
+              </div>
+            </div>
+
+            {balance < total && <p className="text-sm text-destructive text-center">Saldo insuficiente. Carga saldo para continuar.</p>}
+
+            <Button onClick={confirmPayment} disabled={busy || balance < total} className="w-full h-12 text-base">
               {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              Confirmar Pago Realizado
+              Confirmar Pago (Bs {total.toFixed(2)})
             </Button>
+            <Button variant="ghost" className="w-full" onClick={() => { setDriver(null); setCode(""); setTickets(1); }}>Cancelar</Button>
           </div>
         )}
       </Card>
