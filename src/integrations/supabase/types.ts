@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       profiles: {
         Row: {
+          balance: number
           birthdate: string | null
           category: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url: string | null
@@ -40,6 +41,7 @@ export type Database = {
           status: Database["public"]["Enums"]["user_status"]
         }
         Insert: {
+          balance?: number
           birthdate?: string | null
           category?: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url?: string | null
@@ -64,6 +66,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["user_status"]
         }
         Update: {
+          balance?: number
           birthdate?: string | null
           category?: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url?: string | null
@@ -142,6 +145,7 @@ export type Database = {
           driver_id: string
           id: string
           passenger_id: string
+          tickets: number
           verification_code: string
         }
         Insert: {
@@ -151,6 +155,7 @@ export type Database = {
           driver_id: string
           id?: string
           passenger_id: string
+          tickets?: number
           verification_code: string
         }
         Update: {
@@ -160,6 +165,7 @@ export type Database = {
           driver_id?: string
           id?: string
           passenger_id?: string
+          tickets?: number
           verification_code?: string
         }
         Relationships: []
@@ -182,11 +188,66 @@ export type Database = {
         }
         Relationships: []
       }
+      wallet_topups: {
+        Row: {
+          amount: number
+          created_at: string
+          id: string
+          method: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          id?: string
+          method?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          id?: string
+          method?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      withdrawals: {
+        Row: {
+          amount: number
+          created_at: string
+          destination: string
+          driver_id: string
+          id: string
+          status: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          destination: string
+          driver_id: string
+          id?: string
+          status?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          destination?: string
+          driver_id?: string
+          id?: string
+          status?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      fare_for_category: {
+        Args: { _c: Database["public"]["Enums"]["fare_category"] }
+        Returns: number
+      }
       find_driver_by_code: {
         Args: { _code: string }
         Returns: {
@@ -208,6 +269,25 @@ export type Database = {
         Returns: boolean
       }
       lookup_email_by_phone: { Args: { _phone: string }; Returns: string }
+      pay_fare: {
+        Args: { _driver_code: string; _tickets: number }
+        Returns: {
+          base_amount: number
+          category: Database["public"]["Enums"]["fare_category"]
+          extra_amount: number
+          new_balance: number
+          total: number
+          verification_code: string
+        }[]
+      }
+      topup_wallet: {
+        Args: { _amount: number; _method?: string }
+        Returns: number
+      }
+      withdraw_earnings: {
+        Args: { _amount: number; _destination: string }
+        Returns: number
+      }
     }
     Enums: {
       app_role: "admin" | "supervisor" | "passenger" | "driver"
