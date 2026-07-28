@@ -2,21 +2,34 @@ import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
+import { playSuccessChime } from "@/lib/sound";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { LogOut, Circle, Flag } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { toast } from "sonner";
+import { LogOut, Circle, Flag, Wallet, Loader2, BadgeCheck, Banknote } from "lucide-react";
+import QRCode from "qrcode";
 
 export const Route = createFileRoute("/driver")({ ssr: false, component: DriverPage });
 
-type Tx = { id: string; amount: number; category: string; verification_code: string; created_at: string };
+type Tx = { id: string; amount: number; category: string; verification_code: string; created_at: string; tickets: number };
 
 function DriverPage() {
-  const { profile, userId, loading } = useSession();
+  const { profile, userId, loading, refresh } = useSession();
   const navigate = useNavigate();
   const [txs, setTxs] = useState<Tx[]>([]);
   const [lastCode, setLastCode] = useState<string | null>(null);
-  const [lastAmount, setLastAmount] = useState<number | null>(null);
+  const [lastTickets, setLastTickets] = useState<number>(0);
   const [flash, setFlash] = useState(false);
+  const [codeQr, setCodeQr] = useState<string | null>(null);
+
+  // Withdraw modal
+  const [wOpen, setWOpen] = useState(false);
+  const [wAmount, setWAmount] = useState("");
+  const [wDest, setWDest] = useState("");
+  const [wBusy, setWBusy] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -25,8 +38,13 @@ function DriverPage() {
   }, [loading, profile, userId, navigate]);
 
   useEffect(() => {
+    if (!profile?.driver_code) return;
+    QRCode.toDataURL(profile.driver_code, { width: 320, margin: 1 }).then(setCodeQr).catch(() => setCodeQr(null));
+  }, [profile?.driver_code]);
+
+  useEffect(() => {
     if (!userId) return;
-    const today = new Date(); today.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
     supabase.from("transactions").select("*").eq("driver_id", userId).gte("created_at", today.toISOString()).order("created_at", { ascending: false })
       .then(({ data }) => setTxs((data as Tx[]) ?? []));
 
@@ -35,12 +53,31 @@ function DriverPage() {
         const t = payload.new as Tx;
         setTxs((prev) => [t, ...prev]);
         setLastCode(t.verification_code);
-        setLastAmount(Number(t.amount));
+        setLastTickets(Number(t.tickets ?? 1));
         setFlash(true);
-        setTimeout(() => setFlash(false), 2500);
+        playSuccessChime();
+        refresh();
+        setTimeout(() => setFlash(false), 3000);
       }).subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [userId]);
+
+  async function doWithdraw() {
+    const amount = Number(wAmount);
+    if (!Number.isFinite(amount) || amount <= 0) return toast.error("Monto inválido");
+    if (!wDest.trim()) return toast.error("Ingresa tu cuenta bancaria o QR personal");
+    setWBusy(true);
+    try {
+      const { error } = await supabase.rpc("withdraw_earnings", { _amount: amount, _destination: wDest.trim() });
+      if (error) throw error;
+      await refresh();
+      playSuccessChime();
+      toast.success(`Retiro de Bs ${amount.toFixed(2)} enviado a ${wDest.trim()}`);
+      setWOpen(false); setWAmount(""); setWDest("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al retirar");
+    } finally { setWBusy(false); }
+  }
 
   if (loading || !profile) return <div className="p-8">Cargando...</div>;
 
@@ -59,10 +96,23 @@ function DriverPage() {
     );
   }
 
-  const total = txs.reduce((s, t) => s + Number(t.amount), 0);
+  const totalTickets = txs.reduce((s, t) => s + Number(t.tickets ?? 1), 0);
+  const totalToday = txs.reduce((s, t) => s + Number(t.amount), 0);
+  const balance = Number(profile.balance ?? 0);
 
   return (
-    <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4">
+    <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4 relative">
+      {/* Full-screen success overlay: no category, no amount */}
+      {flash && (
+        <div className="fixed inset-0 z-50 bg-success/95 flex flex-col items-center justify-center text-center p-6">
+          <BadgeCheck className="w-20 h-20 text-white mb-4" />
+          <p className="text-3xl font-black text-white">¡Pago Recibido!</p>
+          <p className="text-2xl font-bold text-white mt-1">{lastTickets} Pasaje{lastTickets > 1 ? "s" : ""}</p>
+          <p className="text-white/80 mt-4 text-sm">Código de validación</p>
+          <p className="text-5xl font-black text-white tracking-widest tabular-nums">{lastCode}</p>
+        </div>
+      )}
+
       <header className="flex items-center justify-between py-2">
         <div>
           <p className="text-xs uppercase text-muted-foreground">Chofer</p>
@@ -81,21 +131,56 @@ function DriverPage() {
       <Card className="p-6 text-center bg-gradient-to-br from-primary/10 to-accent">
         <p className="text-xs uppercase text-muted-foreground tracking-widest">Tu código</p>
         <div className="text-5xl font-black text-primary my-2 tracking-widest">{profile.driver_code}</div>
-        <p className="text-xs text-muted-foreground">Los pasajeros ingresan este código para pagar</p>
+        {codeQr && (
+          <div className="bg-white p-3 rounded-lg inline-block border">
+            <img src={codeQr} alt={`QR del chofer ${profile.driver_code}`} className="w-40 h-40" />
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground mt-2">Los pasajeros escanean este QR (o tipean el código) para pagar</p>
+      </Card>
+
+      {/* Earnings wallet */}
+      <Card className="p-5">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+          <Wallet className="w-4 h-4" /> Saldo Acumulado
+        </div>
+        <div className="text-4xl font-black my-2">Bs {balance.toFixed(2)}</div>
+        <Dialog open={wOpen} onOpenChange={setWOpen}>
+          <DialogTrigger asChild>
+            <Button className="w-full" variant="secondary"><Banknote className="w-4 h-4 mr-2" /> Retirar Ganancias</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-full sm:max-w-sm">
+            <DialogHeader><DialogTitle>Retirar ganancias</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label>Monto (Bs)</Label>
+                <Input type="number" min={1} step="0.5" value={wAmount} onChange={(e) => setWAmount(e.target.value)} placeholder={balance.toFixed(2)} />
+                <Button type="button" variant="link" size="sm" className="px-0" onClick={() => setWAmount(balance.toFixed(2))}>Retirar todo</Button>
+              </div>
+              <div>
+                <Label>Cuenta bancaria o QR personal</Label>
+                <Input value={wDest} onChange={(e) => setWDest(e.target.value)} placeholder="Ej. BNB 1002345678 / QR Tigo Money" />
+              </div>
+              <Button className="w-full" onClick={doWithdraw} disabled={wBusy}>
+                {wBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Confirmar retiro
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </Card>
 
       <div className="grid grid-cols-2 gap-3">
         <Card className="p-4 text-center">
-          <div className="text-xs text-muted-foreground">Validaciones hoy</div>
-          <div className="text-3xl font-bold">{txs.length}</div>
+          <div className="text-xs text-muted-foreground">Pasajes hoy</div>
+          <div className="text-3xl font-bold">{totalTickets}</div>
         </Card>
         <Card className="p-4 text-center">
           <div className="text-xs text-muted-foreground">Total hoy</div>
-          <div className="text-3xl font-bold">Bs {total.toFixed(2)}</div>
+          <div className="text-3xl font-bold">Bs {totalToday.toFixed(2)}</div>
         </Card>
       </div>
 
-      {/* OLED Hardware simulator */}
+      {/* OLED Hardware simulator — no fare or category shown */}
       <div>
         <p className="text-xs text-muted-foreground mb-2 text-center">Pantalla del hardware (OLED 0.96")</p>
         <div className="oled-screen p-6 mx-auto max-w-xs aspect-[4/3] flex flex-col items-center justify-center">
@@ -107,7 +192,7 @@ function DriverPage() {
             <>
               <div className="text-xs opacity-70">CÓDIGO</div>
               <div className="text-4xl font-bold tracking-widest tabular-nums">{lastCode}</div>
-              <div className="mt-2 text-lg">Bs {lastAmount?.toFixed(2)}</div>
+              <div className="mt-2 text-lg">{lastTickets} Pasaje{lastTickets > 1 ? "s" : ""}</div>
             </>
           ) : (
             <div className="text-sm opacity-70">Esperando pago...</div>
@@ -119,9 +204,9 @@ function DriverPage() {
         <h3 className="font-semibold mb-2">Últimas validaciones</h3>
         <div className="divide-y text-sm">
           {txs.slice(0, 10).map((t) => (
-            <div key={t.id} className="py-2 flex justify-between items-center">
+            <div key={t.id} className="py-2 flex justify-between items-center gap-2">
               <span className="font-mono">{t.verification_code}</span>
-              <span>Bs {Number(t.amount).toFixed(2)}</span>
+              <span>{Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}</span>
               <span className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleTimeString()}</span>
             </div>
           ))}
