@@ -8,8 +8,11 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { LogOut, Circle, Flag, Wallet, Loader2, BadgeCheck, Banknote } from "lucide-react";
+import { LogOut, Circle, Flag, Wallet, Loader2, BadgeCheck, Banknote, Bluetooth, BluetoothConnected } from "lucide-react";
+import { isBluetoothSupported, linkHardware, sendPaymentOk } from "@/lib/bluetooth";
+import { toAccountId } from "@/lib/bank";
 import QRCode from "qrcode";
 
 export const Route = createFileRoute("/driver")({ ssr: false, component: DriverPage });
@@ -30,6 +33,22 @@ function DriverPage() {
   const [wAmount, setWAmount] = useState("");
   const [wDest, setWDest] = useState("");
   const [wBusy, setWBusy] = useState(false);
+
+  // Bluetooth hardware link
+  const [btName, setBtName] = useState<string | null>(null);
+  const [btBusy, setBtBusy] = useState(false);
+
+  async function linkBluetooth() {
+    if (!isBluetoothSupported()) return toast.error("Este navegador no soporta Web Bluetooth");
+    setBtBusy(true);
+    try {
+      const name = await linkHardware();
+      setBtName(name);
+      toast.success(`Hardware ${name} enlazado`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo enlazar el hardware");
+    } finally { setBtBusy(false); }
+  }
 
   useEffect(() => {
     if (loading) return;
@@ -56,6 +75,7 @@ function DriverPage() {
         setLastTickets(Number(t.tickets ?? 1));
         setFlash(true);
         playSuccessChime();
+        void sendPaymentOk(Number(t.amount ?? 0));
         refresh();
         setTimeout(() => setFlash(false), 3000);
       }).subscribe();
@@ -65,7 +85,7 @@ function DriverPage() {
   async function doWithdraw() {
     const amount = Number(wAmount);
     if (!Number.isFinite(amount) || amount <= 0) return toast.error("Monto inválido");
-    if (!wDest.trim()) return toast.error("Ingresa tu cuenta bancaria o QR personal");
+    if (!wDest.trim()) return toast.error("Selecciona tu cuenta bancaria registrada");
     setWBusy(true);
     try {
       const { error } = await supabase.rpc("withdraw_earnings", { _amount: amount, _destination: wDest.trim() });
@@ -99,6 +119,7 @@ function DriverPage() {
   const totalTickets = txs.reduce((s, t) => s + Number(t.tickets ?? 1), 0);
   const totalToday = txs.reduce((s, t) => s + Number(t.amount), 0);
   const balance = Number(profile.balance ?? 0);
+  const account = profile.bank_account ? toAccountId(profile.bank_account) : "";
 
   return (
     <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4 relative">
@@ -139,13 +160,18 @@ function DriverPage() {
         <p className="text-xs text-muted-foreground mt-2">Los pasajeros escanean este QR (o tipean el código) para pagar</p>
       </Card>
 
+      <Button variant={btName ? "secondary" : "outline"} className="w-full" onClick={linkBluetooth} disabled={btBusy}>
+        {btBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : btName ? <BluetoothConnected className="w-4 h-4 mr-2 text-success" /> : <Bluetooth className="w-4 h-4 mr-2" />}
+        {btName ? `Hardware enlazado: ${btName}` : "Enlazar Tablero de Hardware (Bluetooth)"}
+      </Button>
+
       {/* Earnings wallet */}
       <Card className="p-5">
         <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
           <Wallet className="w-4 h-4" /> Saldo Acumulado
         </div>
         <div className="text-4xl font-black my-2">Bs {balance.toFixed(2)}</div>
-        <Dialog open={wOpen} onOpenChange={setWOpen}>
+        <Dialog open={wOpen} onOpenChange={(o) => { setWOpen(o); if (o && account) setWDest(account); }}>
           <DialogTrigger asChild>
             <Button className="w-full" variant="secondary"><Banknote className="w-4 h-4 mr-2" /> Retirar Ganancias</Button>
           </DialogTrigger>
@@ -158,10 +184,19 @@ function DriverPage() {
                 <Button type="button" variant="link" size="sm" className="px-0" onClick={() => setWAmount(balance.toFixed(2))}>Retirar todo</Button>
               </div>
               <div>
-                <Label>Cuenta bancaria o QR personal</Label>
-                <Input value={wDest} onChange={(e) => setWDest(e.target.value)} placeholder="Ej. BNB 1002345678 / QR Tigo Money" />
+                <Label>Cuenta bancaria registrada</Label>
+                {account ? (
+                  <Select value={wDest || account} onValueChange={setWDest}>
+                    <SelectTrigger><SelectValue placeholder="Selecciona tu cuenta" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={account}>{account}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="text-sm text-destructive">No tienes una cuenta bancaria registrada.</p>
+                )}
               </div>
-              <Button className="w-full" onClick={doWithdraw} disabled={wBusy}>
+              <Button className="w-full" onClick={doWithdraw} disabled={wBusy || !account}>
                 {wBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Confirmar retiro
               </Button>
             </div>

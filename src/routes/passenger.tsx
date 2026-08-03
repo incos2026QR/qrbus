@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
 import { CATEGORY_LABELS, CATEGORY_PRICES, type Category } from "@/lib/categories";
+import { toAccountId, getCoords, payFare, topUp as bankTopUp } from "@/lib/bank";
 import { playSuccessChime } from "@/lib/sound";
 import { QrScanner } from "@/components/QrScanner";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard } from "lucide-react";
+import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History } from "lucide-react";
 import QRCode from "qrcode";
 
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
@@ -22,6 +23,17 @@ type DriverInfo = {
   driver_code: string;
   first_name: string | null;
   paternal_surname: string | null;
+  bank_account: string | null;
+};
+
+type MyTx = { id: string; verification_code: string; tickets: number; created_at: string };
+
+const TARIFA_API_LABEL: Record<Category, string> = {
+  general: "General",
+  primaria: "Estudiante",
+  secundaria: "Estudiante",
+  adulto_mayor: "Adulto Mayor",
+  discapacidad: "Adulto Mayor",
 };
 
 const GENERAL_PRICE = CATEGORY_PRICES.general;
@@ -34,15 +46,8 @@ function PassengerPage() {
   const [tickets, setTickets] = useState(1);
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [pass, setPass] = useState<{
-    vcode: string;
-    selfieUrl: string | null;
-    base: number;
-    extra: number;
-    total: number;
-    tickets: number;
-    category: Category;
-  } | null>(null);
+  const [pass, setPass] = useState<{ vcode: string; selfieUrl: string | null; tickets: number } | null>(null);
+  const [history, setHistory] = useState<MyTx[]>([]);
 
   // Top-up modal
   const [topupOpen, setTopupOpen] = useState(false);
@@ -62,6 +67,18 @@ function PassengerPage() {
       .then(setTopupQr)
       .catch(() => setTopupQr(null));
   }, [topupOpen, topupAmount]);
+
+  async function loadHistory() {
+    if (!userId) return;
+    const { data } = await supabase
+      .from("transactions")
+      .select("id, verification_code, tickets, created_at")
+      .eq("passenger_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(15);
+    setHistory((data as MyTx[]) ?? []);
+  }
+  useEffect(() => { loadHistory(); }, [userId]);
 
   const balance = Number(profile?.balance ?? 0);
   const basePrice = profile?.category ? CATEGORY_PRICES[profile.category] : GENERAL_PRICE;
@@ -85,6 +102,9 @@ function PassengerPage() {
     try {
       const { error } = await supabase.rpc("topup_wallet", { _amount: amount, _method: "qr" });
       if (error) throw error;
+      if (profile?.bank_account) {
+        try { await bankTopUp(toAccountId(profile.bank_account), amount); } catch { /* API bancaria offline */ }
+      }
       await refresh();
       playSuccessChime();
       toast.success(`Saldo cargado: Bs ${amount.toFixed(2)}`);
@@ -100,22 +120,39 @@ function PassengerPage() {
     if (!driver || !profile) return;
     setBusy(true);
     try {
-      const { data, error } = await supabase.rpc("pay_fare", { _driver_code: driver.driver_code, _tickets: tickets });
+      const coords = await getCoords();
+      const { data, error } = await supabase.rpc("pay_fare", {
+        _driver_code: driver.driver_code,
+        _tickets: tickets,
+        _lat: coords.latitud,
+        _lng: coords.longitud,
+      });
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) throw new Error("No se pudo procesar el pago");
+
+      // Cobro en la API bancaria simulada
+      if (profile.bank_account && driver.bank_account) {
+        try {
+          await payFare({
+            cuentaOrigen: toAccountId(profile.bank_account),
+            cuentaDestino: toAccountId(driver.bank_account),
+            monto: Number(row.total),
+            tarifaTipo: TARIFA_API_LABEL[(row.category as Category) ?? "general"],
+            cantidadPasajes: tickets,
+            latitud: coords.latitud,
+            longitud: coords.longitud,
+          });
+        } catch (apiErr) {
+          toast.warning(apiErr instanceof Error ? apiErr.message : "El banco no respondió");
+        }
+      }
+
       const selfie = profile.selfie_url ? await getSignedUrl(supabase, "kyc-documents", profile.selfie_url) : null;
       playSuccessChime();
-      setPass({
-        vcode: row.verification_code,
-        selfieUrl: selfie,
-        base: Number(row.base_amount),
-        extra: Number(row.extra_amount),
-        total: Number(row.total),
-        tickets,
-        category: row.category as Category,
-      });
+      setPass({ vcode: row.verification_code, selfieUrl: selfie, tickets });
       await refresh();
+      loadHistory();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error");
     } finally {
@@ -146,28 +183,9 @@ function PassengerPage() {
           <p className="text-sm text-muted-foreground uppercase tracking-widest">Código de Validación</p>
           <div className="text-7xl font-black text-success my-4 tracking-widest tabular-nums">{pass.vcode}</div>
           {pass.selfieUrl && (
-            <img src={pass.selfieUrl} alt="Selfie del pasajero" className="w-40 h-40 object-cover rounded-full mx-auto border-4 border-primary shadow-lg" />
+            <img src={pass.selfieUrl} alt="Selfie con CI del pasajero" className="w-40 h-40 object-cover rounded-full mx-auto border-4 border-primary shadow-lg" />
           )}
-          <Card className="mt-5 p-4 text-left text-sm space-y-1">
-            <div className="flex justify-between">
-              <span>1 {CATEGORY_LABELS[pass.category]}</span>
-              <span>Bs {pass.base.toFixed(2)}</span>
-            </div>
-            {pass.tickets > 1 && (
-              <div className="flex justify-between">
-                <span>{pass.tickets - 1} General</span>
-                <span>Bs {pass.extra.toFixed(2)}</span>
-              </div>
-            )}
-            <div className="flex justify-between font-bold border-t pt-1">
-              <span>Total ({pass.tickets} pasaje{pass.tickets > 1 ? "s" : ""})</span>
-              <span>Bs {pass.total.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-muted-foreground">
-              <span>Saldo restante</span>
-              <span>Bs {balance.toFixed(2)}</span>
-            </div>
-          </Card>
+          <div className="mt-5 text-2xl font-bold">{pass.tickets} Pasaje{pass.tickets > 1 ? "s" : ""} pagado{pass.tickets > 1 ? "s" : ""}</div>
           <p className="mt-4 text-sm text-muted-foreground">Muestra este código al chofer para validar el pago.</p>
           <Button className="mt-5 w-full" variant="outline" onClick={() => { setPass(null); setDriver(null); setCode(""); setTickets(1); }}>
             Nueva validación
@@ -292,6 +310,22 @@ function PassengerPage() {
             <Button variant="ghost" className="w-full" onClick={() => { setDriver(null); setCode(""); setTickets(1); }}>Cancelar</Button>
           </div>
         )}
+      </Card>
+
+      <Card className="p-4 mt-4">
+        <h3 className="font-semibold mb-2 flex items-center gap-2 text-sm">
+          <History className="w-4 h-4" /> Mis transacciones
+        </h3>
+        <div className="divide-y text-sm">
+          {history.map((t) => (
+            <div key={t.id} className="py-2 flex justify-between items-center gap-2">
+              <span className="font-mono">{t.verification_code}</span>
+              <span>{Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}</span>
+              <span className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleString()}</span>
+            </div>
+          ))}
+          {history.length === 0 && <p className="text-muted-foreground py-3">Aún no tienes transacciones.</p>}
+        </div>
       </Card>
     </div>
   );

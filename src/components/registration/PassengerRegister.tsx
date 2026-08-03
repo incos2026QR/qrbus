@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Loader2, Sparkles, Upload, Check } from "lucide-react";
 import { signUpAutoConfirm } from "@/lib/auth.functions";
 import { uploadImage, makeSampleImage } from "@/lib/image";
+import { toAccountId, createAccount } from "@/lib/bank";
 import {
   CATEGORY_LABELS, CATEGORY_PRICES,
   computeAge, ageBucket, resolveCategory, type Category,
@@ -26,6 +27,7 @@ type FormState = {
   maternal_surname: string;
   ci_number: string;
   birthdate: string;
+  bank_account: string;
   chosen: Category;
   hasDisability: boolean;
   files: {
@@ -39,7 +41,7 @@ type FormState = {
 
 const initial: FormState = {
   step: 1, phone: "", password: "", email: "",
-  first_name: "", paternal_surname: "", maternal_surname: "", ci_number: "", birthdate: "",
+  first_name: "", paternal_surname: "", maternal_surname: "", ci_number: "", birthdate: "", bank_account: "",
   chosen: "general", hasDisability: false, files: {},
 };
 
@@ -58,6 +60,7 @@ export function PassengerRegister() {
       maternal_surname: "Quispe",
       ci_number: "" + Math.floor(1000000 + Math.random() * 8999999),
       birthdate: "1995-06-15",
+      bank_account: `BNB - ${Math.floor(100000 + Math.random() * 899999)}`,
       chosen: "general",
       hasDisability: false,
       files: {
@@ -97,9 +100,12 @@ export function PassengerRegister() {
       return toast.error("Sube el Carnet de Discapacidad");
     }
 
+    if (!s.bank_account.trim()) return toast.error("Ingresa tu banco y número de cuenta");
+
     setBusy(true);
     try {
       const email = s.email || `${s.phone}@pagojusto.bo`;
+      const accountId = toAccountId(s.bank_account);
       const { userId } = await signUpAutoConfirm({ data: { email, password: s.password, phone: s.phone } });
       const { error: signIn } = await supabase.auth.signInWithPassword({ email, password: s.password });
       if (signIn) throw signIn;
@@ -126,11 +132,17 @@ export function PassengerRegister() {
         phone: s.phone,
         email,
         category: finalCategory,
+        bank_account: accountId,
         ...uploads,
       });
       if (profErr) throw profErr;
       await supabase.from("user_roles").insert({ user_id: userId, role: "passenger" });
-      toast.success("Registro exitoso. Cuenta pendiente de aprobación.");
+      try {
+        await createAccount(accountId, `${s.first_name} ${s.paternal_surname}`.trim());
+      } catch {
+        /* la cuenta ya podría existir en el banco */
+      }
+      toast.success(`Registro exitoso (${accountId}). Cuenta pendiente de aprobación.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error");
     } finally { setBusy(false); }
@@ -167,6 +179,11 @@ export function PassengerRegister() {
           <div><Label>Apellido Materno</Label><Input value={s.maternal_surname} onChange={(e) => setS({...s, maternal_surname: e.target.value})} /></div>
           <div><Label>CI *</Label><Input value={s.ci_number} onChange={(e) => setS({...s, ci_number: e.target.value})} /></div>
           <div><Label>Fecha de nacimiento *</Label><Input type="date" value={s.birthdate} onChange={(e) => setS({...s, birthdate: e.target.value})} /></div>
+          <div>
+            <Label>Banco y número de cuenta *</Label>
+            <Input value={s.bank_account} onChange={(e) => setS({...s, bank_account: e.target.value})} placeholder="Ej. BNB - 104578" />
+            <p className="text-xs text-muted-foreground mt-1">Cuenta bancaria: <strong>{toAccountId(s.bank_account) || "CTA-…"}</strong></p>
+          </div>
         </div>
       )}
 

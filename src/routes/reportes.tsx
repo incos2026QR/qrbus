@@ -34,7 +34,7 @@ function ReportsPage() {
   const navigate = useNavigate();
   const [category, setCategory] = useState("tarifa_incorrecta");
   const [driverCode, setDriverCode] = useState("");
-  const [transactionId, setTransactionId] = useState("");
+  const [validationCode, setValidationCode] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [mine, setMine] = useState<MyReport[]>([]);
@@ -65,11 +65,11 @@ function ReportsPage() {
         category,
         description: description.trim(),
         driver_code: driverCode.trim().toUpperCase() || null,
-        transaction_id: transactionId.trim() || null,
+        validation_code: validationCode.trim() || null,
       });
       if (error) throw error;
       toast.success("Reporte enviado. Un supervisor lo revisará.");
-      setDescription(""); setDriverCode(""); setTransactionId("");
+      setDescription(""); setDriverCode(""); setValidationCode("");
       loadMine();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error");
@@ -101,8 +101,8 @@ function ReportsPage() {
             <Input value={driverCode} onChange={(e) => setDriverCode(e.target.value.toUpperCase())} placeholder="DRV84" />
           </div>
           <div>
-            <Label>ID de transacción (opcional)</Label>
-            <Input value={transactionId} onChange={(e) => setTransactionId(e.target.value)} placeholder="UUID" />
+            <Label>Código de validación (opcional)</Label>
+            <Input value={validationCode} onChange={(e) => setValidationCode(e.target.value)} maxLength={5} placeholder="84A29" />
           </div>
           <div>
             <Label>Descripción *</Label>
