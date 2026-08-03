@@ -31,7 +31,8 @@ export async function linkHardware(): Promise<string> {
     characteristic = null;
     deviceName = null;
   });
-  return deviceName;
+  return deviceName ?? "Trufi_Hardware_01";
+
 }
 
 /** Envía 'OK:Monto' para encender el LED de estado y activar el buzzer. */
