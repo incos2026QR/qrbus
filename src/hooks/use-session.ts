@@ -23,7 +23,9 @@ export type Profile = {
   qr_primaria_url: string | null;
   qr_secundaria_url: string | null;
   qr_adulto_url: string | null;
+  bank_account: string | null;
   balance: number;
+
 };
 
 export function useSession() {
