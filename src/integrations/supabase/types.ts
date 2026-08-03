@@ -17,6 +17,7 @@ export type Database = {
       profiles: {
         Row: {
           balance: number
+          bank_account: string | null
           birthdate: string | null
           category: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url: string | null
@@ -42,6 +43,7 @@ export type Database = {
         }
         Insert: {
           balance?: number
+          bank_account?: string | null
           birthdate?: string | null
           category?: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url?: string | null
@@ -67,6 +69,7 @@ export type Database = {
         }
         Update: {
           balance?: number
+          bank_account?: string | null
           birthdate?: string | null
           category?: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url?: string | null
@@ -106,6 +109,7 @@ export type Database = {
           status: string
           transaction_id: string | null
           updated_at: string
+          validation_code: string | null
         }
         Insert: {
           admin_notes?: string | null
@@ -120,6 +124,7 @@ export type Database = {
           status?: string
           transaction_id?: string | null
           updated_at?: string
+          validation_code?: string | null
         }
         Update: {
           admin_notes?: string | null
@@ -134,6 +139,7 @@ export type Database = {
           status?: string
           transaction_id?: string | null
           updated_at?: string
+          validation_code?: string | null
         }
         Relationships: []
       }
@@ -144,6 +150,8 @@ export type Database = {
           created_at: string
           driver_id: string
           id: string
+          latitude: number | null
+          longitude: number | null
           passenger_id: string
           tickets: number
           verification_code: string
@@ -154,6 +162,8 @@ export type Database = {
           created_at?: string
           driver_id: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           passenger_id: string
           tickets?: number
           verification_code: string
@@ -164,6 +174,8 @@ export type Database = {
           created_at?: string
           driver_id?: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           passenger_id?: string
           tickets?: number
           verification_code?: string
@@ -251,14 +263,11 @@ export type Database = {
       find_driver_by_code: {
         Args: { _code: string }
         Returns: {
+          bank_account: string
           driver_code: string
           first_name: string
           id: string
           paternal_surname: string
-          qr_adulto_url: string
-          qr_general_url: string
-          qr_primaria_url: string
-          qr_secundaria_url: string
         }[]
       }
       has_role: {
@@ -269,17 +278,34 @@ export type Database = {
         Returns: boolean
       }
       lookup_email_by_phone: { Args: { _phone: string }; Returns: string }
-      pay_fare: {
-        Args: { _driver_code: string; _tickets: number }
-        Returns: {
-          base_amount: number
-          category: Database["public"]["Enums"]["fare_category"]
-          extra_amount: number
-          new_balance: number
-          total: number
-          verification_code: string
-        }[]
-      }
+      pay_fare:
+        | {
+            Args: { _driver_code: string; _tickets: number }
+            Returns: {
+              base_amount: number
+              category: Database["public"]["Enums"]["fare_category"]
+              extra_amount: number
+              new_balance: number
+              total: number
+              verification_code: string
+            }[]
+          }
+        | {
+            Args: {
+              _driver_code: string
+              _lat?: number
+              _lng?: number
+              _tickets: number
+            }
+            Returns: {
+              base_amount: number
+              category: Database["public"]["Enums"]["fare_category"]
+              extra_amount: number
+              new_balance: number
+              total: number
+              verification_code: string
+            }[]
+          }
       topup_wallet: {
         Args: { _amount: number; _method?: string }
         Returns: number
