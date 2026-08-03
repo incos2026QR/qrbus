@@ -12,13 +12,16 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { LogOut, Users, Bus, Shield, BarChart3, CheckCircle2, XCircle, Ban, ArrowUp, Menu } from "lucide-react";
+import { LogOut, Users, Bus, Shield, BarChart3, CheckCircle2, XCircle, Ban, ArrowUp, Menu, Receipt, MapPin, Download } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { toAccountId } from "@/lib/bank";
+import * as XLSX from "xlsx";
 import { grantRole } from "@/lib/auth.functions";
 import { CATEGORY_LABELS, CATEGORY_PRICES, type Category } from "@/lib/categories";
 
 export const Route = createFileRoute("/admin")({ ssr: false, component: AdminPage });
 
-type Tab = "drivers" | "passengers" | "supervisors" | "reports";
+type Tab = "drivers" | "passengers" | "supervisors" | "transactions" | "reports";
 
 function AdminPage() {
   const { profile, loading, refresh } = useSession();
@@ -40,6 +43,7 @@ function AdminPage() {
       <NavBtn active={tab === "drivers"} onClick={() => { setTab("drivers"); setDrawerOpen(false); }} icon={<Bus className="w-4 h-4" />}>Choferes</NavBtn>
       <NavBtn active={tab === "passengers"} onClick={() => { setTab("passengers"); setDrawerOpen(false); }} icon={<Users className="w-4 h-4" />}>Pasajeros</NavBtn>
       {isAdmin && <NavBtn active={tab === "supervisors"} onClick={() => { setTab("supervisors"); setDrawerOpen(false); }} icon={<Shield className="w-4 h-4" />}>Supervisores</NavBtn>}
+      <NavBtn active={tab === "transactions"} onClick={() => { setTab("transactions"); setDrawerOpen(false); }} icon={<Receipt className="w-4 h-4" />}>Transacciones</NavBtn>
       <NavBtn active={tab === "reports"} onClick={() => { setTab("reports"); setDrawerOpen(false); }} icon={<BarChart3 className="w-4 h-4" />}>Reportes</NavBtn>
     </>
   );
@@ -86,6 +90,7 @@ function AdminPage() {
         {tab === "drivers" && <UserTable role="driver" onChange={refresh} />}
         {tab === "passengers" && <UserTable role="passenger" onChange={refresh} />}
         {tab === "supervisors" && isAdmin && <UserTable role="supervisor" onChange={refresh} allowPromote={false} />}
+        {tab === "transactions" && <TransactionsPanel />}
         {tab === "reports" && <ReportsPanel />}
       </main>
     </div>
@@ -105,6 +110,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
   const [rows, setRows] = useState<Profile[]>([]);
   const [selected, setSelected] = useState<Profile | null>(null);
   const [overrideCategory, setOverrideCategory] = useState<Category | "">("");
+  const [bankAccount, setBankAccount] = useState("");
 
   async function load() {
     const { data } = await supabase.from("profiles").select("*").eq("role", role).order("created_at", { ascending: false });
@@ -114,7 +120,16 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
 
   useEffect(() => {
     setOverrideCategory((selected?.category as Category | null) ?? "");
+    setBankAccount(selected?.bank_account ?? "");
   }, [selected]);
+
+  async function saveBankAccount() {
+    if (!selected) return;
+    const { error } = await supabase.from("profiles").update({ bank_account: toAccountId(bankAccount) }).eq("id", selected.id);
+    if (error) return toast.error(error.message);
+    toast.success("Cuenta bancaria actualizada");
+    load();
+  }
 
   const filtered = rows.filter((r) => subtab === "pending" ? r.status === "pending" : r.status !== "pending");
 
@@ -182,6 +197,16 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                 <p><strong>CI:</strong> {selected.ci_number} · <strong>Nacimiento:</strong> {selected.birthdate}</p>
                 <p><strong>Teléfono:</strong> {selected.phone} · <strong>Email:</strong> {selected.email}</p>
                 {selected.driver_code && <p><strong>Código chofer:</strong> {selected.driver_code}</p>}
+                <p><strong>Saldo:</strong> Bs {Number(selected.balance ?? 0).toFixed(2)}</p>
+              </div>
+
+              <div className="rounded-md border p-3 space-y-2">
+                <p className="text-sm font-semibold">Banco y número de cuenta</p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Input value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Ej. BNB - 104578" />
+                  <Button variant="secondary" onClick={saveBankAccount} disabled={!bankAccount.trim()}>Guardar cuenta</Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Cuenta: <strong>{toAccountId(bankAccount) || "—"}</strong></p>
               </div>
 
               {selected.role === "passenger" && (
@@ -211,14 +236,6 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                 {selected.license_url && <ImagePreview label="Licencia" path={selected.license_url} bucket="kyc-documents" />}
                 {selected.extra_doc_url && <ImagePreview label="Documento adicional" path={selected.extra_doc_url} bucket="kyc-documents" />}
               </div>
-              {selected.role === "driver" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t">
-                  <ImagePreview label="QR General" path={selected.qr_general_url} bucket="qr-codes" />
-                  <ImagePreview label="QR Primaria" path={selected.qr_primaria_url} bucket="qr-codes" />
-                  <ImagePreview label="QR Secundaria" path={selected.qr_secundaria_url} bucket="qr-codes" />
-                  <ImagePreview label="QR Adulto/Discapacidad" path={selected.qr_adulto_url} bucket="qr-codes" />
-                </div>
-              )}
               <div className="flex flex-wrap gap-2 pt-2">
                 <Button onClick={() => updateStatus(selected.id, "active")} className="bg-success text-success-foreground">
                   <CheckCircle2 className="w-4 h-4 mr-1" /> Aprobar
@@ -270,6 +287,7 @@ type ReportRow = {
   description: string;
   driver_code: string | null;
   transaction_id: string | null;
+  validation_code: string | null;
   reported_user_id: string | null;
   status: string;
   admin_notes: string | null;
@@ -352,7 +370,7 @@ function ReportsPanel() {
                 <p><strong>Fecha:</strong> {new Date(selected.created_at).toLocaleString()}</p>
                 <p><strong>Estado:</strong> {selected.status}</p>
                 {selected.driver_code && <p><strong>Código chofer:</strong> {selected.driver_code}</p>}
-                {selected.transaction_id && <p><strong>Transacción:</strong> {selected.transaction_id}</p>}
+                {selected.validation_code && <p><strong>Código de validación:</strong> {selected.validation_code}</p>}
               </div>
               <div>
                 <p className="font-semibold">Descripción</p>
@@ -394,6 +412,112 @@ function ReportsPanel() {
           )}
         </DialogContent>
       </Dialog>
+    </Card>
+  );
+}
+
+type TxRow = {
+  id: string;
+  driver_id: string;
+  passenger_id: string;
+  category: string;
+  amount: number;
+  tickets: number;
+  verification_code: string;
+  latitude: number | null;
+  longitude: number | null;
+  created_at: string;
+};
+
+function TransactionsPanel() {
+  const [rows, setRows] = useState<TxRow[]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("transactions").select("*").order("created_at", { ascending: false }).limit(500);
+      const txs = (data as TxRow[]) ?? [];
+      setRows(txs);
+      const ids = Array.from(new Set(txs.flatMap((t) => [t.driver_id, t.passenger_id])));
+      if (ids.length) {
+        const { data: profs } = await supabase.from("profiles").select("id, first_name, paternal_surname, driver_code, bank_account").in("id", ids);
+        const map: Record<string, string> = {};
+        for (const p of (profs ?? []) as Partial<Profile>[]) {
+          map[p.id as string] = `${p.first_name ?? ""} ${p.paternal_surname ?? ""}`.trim() || (p.id as string);
+        }
+        setNames(map);
+      }
+    })();
+  }, []);
+
+  function exportExcel() {
+    const sheet = XLSX.utils.json_to_sheet(rows.map((t) => ({
+      Fecha: new Date(t.created_at).toLocaleString(),
+      "Código validación": t.verification_code,
+      Pasajero: names[t.passenger_id] ?? t.passenger_id,
+      Chofer: names[t.driver_id] ?? t.driver_id,
+      Tarifa: CATEGORY_LABELS[t.category as Category] ?? t.category,
+      Pasajes: t.tickets,
+      "Monto (Bs)": Number(t.amount),
+      Latitud: t.latitude ?? "",
+      Longitud: t.longitude ?? "",
+      Mapa: t.latitude != null && t.longitude != null ? `https://www.google.com/maps?q=${t.latitude},${t.longitude}` : "",
+    })));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Transacciones");
+    XLSX.writeFile(wb, `transacciones-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success("Reporte exportado");
+  }
+
+  const total = rows.reduce((s, t) => s + Number(t.amount), 0);
+
+  return (
+    <Card className="p-4 max-w-full overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h2 className="text-xl font-bold">Historial de transacciones</h2>
+        <Button size="sm" variant="secondary" onClick={exportExcel} disabled={rows.length === 0}>
+          <Download className="w-4 h-4 mr-1" /> Exportar Excel
+        </Button>
+      </div>
+      <p className="text-sm text-muted-foreground mb-3">{rows.length} pagos · Total Bs {total.toFixed(2)}</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[720px]">
+          <thead>
+            <tr className="text-left text-xs uppercase text-muted-foreground border-b">
+              <th className="py-2 pr-3">Fecha</th>
+              <th className="py-2 pr-3">Código</th>
+              <th className="py-2 pr-3">Pasajero</th>
+              <th className="py-2 pr-3">Chofer</th>
+              <th className="py-2 pr-3">Tarifa</th>
+              <th className="py-2 pr-3">Pasajes</th>
+              <th className="py-2 pr-3">Monto</th>
+              <th className="py-2 pr-3">Ubicación</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map((t) => (
+              <tr key={t.id}>
+                <td className="py-2 pr-3 whitespace-nowrap">{new Date(t.created_at).toLocaleString()}</td>
+                <td className="py-2 pr-3 font-mono">{t.verification_code}</td>
+                <td className="py-2 pr-3">{names[t.passenger_id] ?? "—"}</td>
+                <td className="py-2 pr-3">{names[t.driver_id] ?? "—"}</td>
+                <td className="py-2 pr-3">{CATEGORY_LABELS[t.category as Category] ?? t.category}</td>
+                <td className="py-2 pr-3">{t.tickets}</td>
+                <td className="py-2 pr-3">Bs {Number(t.amount).toFixed(2)}</td>
+                <td className="py-2 pr-3">
+                  {t.latitude != null && t.longitude != null ? (
+                    <a className="inline-flex items-center gap-1 text-primary underline"
+                      href={`https://www.google.com/maps?q=${t.latitude},${t.longitude}`} target="_blank" rel="noreferrer">
+                      <MapPin className="w-3 h-3" /> Ver mapa
+                    </a>
+                  ) : <span className="text-muted-foreground">Sin GPS</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length === 0 && <p className="text-sm text-muted-foreground p-4">Sin transacciones registradas.</p>}
+      </div>
     </Card>
   );
 }
