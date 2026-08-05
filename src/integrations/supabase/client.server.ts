@@ -30,8 +30,10 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 }
 
 function createSupabaseAdminClient() {
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  //const SUPABASE_URL = process.env.SUPABASE_URL;
+  //const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+   const SUPABASE_URL = "https://ppkdjcjluyneifdiyclt.supabase.co";
+  const SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBwa2RqY2psdXluZWlmZGl5Y2x0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzU0NDMyNiwiZXhwIjoyMDk5MTIwMzI2fQ.sA0hcDSSpBKTW3dD9AeeaI7EmnUKiVDHMO-bgtEPOGI"; // Tu clave Publishable completa
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     const missing = [
