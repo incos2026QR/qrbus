@@ -9,9 +9,11 @@ import { toast } from "sonner";
 import { Loader2, Sparkles, Upload, Check } from "lucide-react";
 import { signUpAutoConfirm } from "@/lib/auth.functions";
 import { uploadImage, makeSampleImage } from "@/lib/image";
-import { toAccountId, createAccount } from "@/lib/bank";
+import { toAccountId, createAccount, BANCOS } from "@/lib/bank";
+import { useTarifas } from "@/lib/tarifas";
+import { Captcha } from "@/components/Captcha";
 import {
-  CATEGORY_LABELS, CATEGORY_PRICES,
+  CATEGORY_LABELS,
   computeAge, ageBucket, resolveCategory, type Category,
 } from "@/lib/categories";
 
@@ -28,6 +30,7 @@ type FormState = {
   ci_number: string;
   birthdate: string;
   bank_account: string;
+  bank_name: string;
   chosen: Category;
   hasDisability: boolean;
   files: {
@@ -41,13 +44,15 @@ type FormState = {
 
 const initial: FormState = {
   step: 1, phone: "", password: "", email: "",
-  first_name: "", paternal_surname: "", maternal_surname: "", ci_number: "", birthdate: "", bank_account: "",
+  first_name: "", paternal_surname: "", maternal_surname: "", ci_number: "", birthdate: "", bank_account: "", bank_name: "",
   chosen: "general", hasDisability: false, files: {},
 };
 
 export function PassengerRegister() {
   const [s, setS] = useState<FormState>(initial);
   const [busy, setBusy] = useState(false);
+  const [captchaOk, setCaptchaOk] = useState(false);
+  const { precio } = useTarifas();
 
   function autofill() {
     setS((p) => ({
@@ -60,7 +65,8 @@ export function PassengerRegister() {
       maternal_surname: "Quispe",
       ci_number: "" + Math.floor(1000000 + Math.random() * 8999999),
       birthdate: "1995-06-15",
-      bank_account: `BNB - ${Math.floor(100000 + Math.random() * 899999)}`,
+      bank_account: `${Math.floor(100000 + Math.random() * 899999)}`,
+      bank_name: "Banco Nacional de Bolivia (BNB)",
       chosen: "general",
       hasDisability: false,
       files: {
@@ -91,7 +97,9 @@ export function PassengerRegister() {
     const age = computeAge(s.birthdate);
     const bucket = ageBucket(age);
     const chosen = bucket.forced ?? s.chosen;
-    const finalCategory = resolveCategory(age, chosen, s.hasDisability);
+    const finalCategory = resolveCategory(age, chosen, s.hasDisability, precio);
+
+    if (!captchaOk) return toast.error("Completa la verificación humana");
 
     if (bucket.requiresUniversityDoc && chosen === "secundaria" && !s.files.university) {
       return toast.error("Sube el Carnet Universitario/Estudiantil");
@@ -100,7 +108,8 @@ export function PassengerRegister() {
       return toast.error("Sube el Carnet de Discapacidad");
     }
 
-    if (!s.bank_account.trim()) return toast.error("Ingresa tu banco y número de cuenta");
+    if (!s.bank_name) return toast.error("Selecciona tu banco");
+    if (!s.bank_account.trim()) return toast.error("Ingresa tu número de cuenta");
 
     setBusy(true);
     try {
@@ -133,12 +142,13 @@ export function PassengerRegister() {
         email,
         category: finalCategory,
         bank_account: accountId,
+        bank_name: s.bank_name,
         ...uploads,
       });
       if (profErr) throw profErr;
       await supabase.from("user_roles").insert({ user_id: userId, role: "passenger" });
       try {
-        await createAccount(accountId, `${s.first_name} ${s.paternal_surname}`.trim());
+        await createAccount(accountId, `${s.first_name} ${s.paternal_surname}`.trim(), s.bank_name);
       } catch {
         /* la cuenta ya podría existir en el banco */
       }
@@ -180,8 +190,17 @@ export function PassengerRegister() {
           <div><Label>CI *</Label><Input value={s.ci_number} onChange={(e) => setS({...s, ci_number: e.target.value})} /></div>
           <div><Label>Fecha de nacimiento *</Label><Input type="date" value={s.birthdate} onChange={(e) => setS({...s, birthdate: e.target.value})} /></div>
           <div>
-            <Label>Banco y número de cuenta *</Label>
-            <Input value={s.bank_account} onChange={(e) => setS({...s, bank_account: e.target.value})} placeholder="Ej. BNB - 104578" />
+            <Label>Banco *</Label>
+            <Select value={s.bank_name} onValueChange={(v) => setS({...s, bank_name: v})}>
+              <SelectTrigger><SelectValue placeholder="Selecciona tu banco" /></SelectTrigger>
+              <SelectContent>
+                {BANCOS.map((b) => <SelectItem key={b.id} value={b.nombre}>{b.nombre}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Número de cuenta *</Label>
+            <Input value={s.bank_account} onChange={(e) => setS({...s, bank_account: e.target.value})} placeholder="Ej. 104578" />
             <p className="text-xs text-muted-foreground mt-1">Cuenta bancaria: <strong>{toAccountId(s.bank_account) || "CTA-…"}</strong></p>
           </div>
         </div>
@@ -189,14 +208,19 @@ export function PassengerRegister() {
 
       {s.step === 3 && (
         <div className="space-y-3">
-          <h3 className="font-semibold">Paso 3: Documentos KYC</h3>
+          <h3 className="font-semibold">Paso 3: Verificación de identidad</h3>
           <FilePick label="Foto CI Frontal *" file={s.files.ci_front} onFile={(f) => setS({...s, files: {...s.files, ci_front: f}})} />
           <FilePick label="Foto CI Reverso *" file={s.files.ci_back} onFile={(f) => setS({...s, files: {...s.files, ci_back: f}})} />
           <FilePick label="Selfie sosteniendo el CI *" file={s.files.selfie} onFile={(f) => setS({...s, files: {...s.files, selfie: f}})} />
         </div>
       )}
 
-      {s.step === 4 && <Step4 s={s} setS={setS} />}
+      {s.step === 4 && (
+        <>
+          <Step4 s={s} setS={setS} />
+          <Captcha verified={captchaOk} onVerify={setCaptchaOk} />
+        </>
+      )}
 
       <div className="flex gap-2 pt-2">
         {s.step > 1 && <Button type="button" variant="outline" onClick={() => setS({...s, step: (s.step - 1) as FormState["step"]})}>Atrás</Button>}
@@ -210,10 +234,11 @@ export function PassengerRegister() {
 }
 
 function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
+  const { precio } = useTarifas();
   const age = s.birthdate ? computeAge(s.birthdate) : 0;
   const bucket = ageBucket(age);
   const chosen = bucket.forced ?? s.chosen;
-  const finalCategory = resolveCategory(age, chosen, s.hasDisability);
+  const finalCategory = resolveCategory(age, chosen, s.hasDisability, precio);
 
   return (
     <div className="space-y-3">
@@ -222,7 +247,7 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
 
       {bucket.forced ? (
         <div className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
-          Asignación automática: <strong>{CATEGORY_LABELS[bucket.forced]}</strong> — Bs {CATEGORY_PRICES[bucket.forced].toFixed(2)}
+          Asignación automática: <strong>{CATEGORY_LABELS[bucket.forced]}</strong> — Bs {precio(bucket.forced).toFixed(2)}
         </div>
       ) : (
         <>
@@ -231,7 +256,7 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               {bucket.options.map((c) => (
-                <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]} — Bs {CATEGORY_PRICES[c].toFixed(2)}</SelectItem>
+                <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]} — Bs {precio(c).toFixed(2)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -257,7 +282,7 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
       )}
 
       <div className="rounded-md bg-accent/40 p-3 text-sm">
-        Tarifa final asignada: <strong>{CATEGORY_LABELS[finalCategory]}</strong> — <strong>Bs {CATEGORY_PRICES[finalCategory].toFixed(2)}</strong>
+        Tarifa final asignada: <strong>{CATEGORY_LABELS[finalCategory]}</strong> — <strong>Bs {precio(finalCategory).toFixed(2)}</strong>
       </div>
     </div>
   );
