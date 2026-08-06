@@ -13,6 +13,9 @@ import { toast } from "sonner";
 import { LogOut, Circle, Flag, Wallet, Loader2, BadgeCheck, Banknote, Bluetooth, BluetoothConnected } from "lucide-react";
 import { isBluetoothSupported, linkHardware, sendPaymentOk } from "@/lib/bluetooth";
 import { toAccountId } from "@/lib/bank";
+import { STATUS_LABELS } from "@/lib/categories";
+import { FilePick } from "@/components/registration/PassengerRegister";
+import { uploadImage } from "@/lib/image";
 import QRCode from "qrcode";
 
 export const Route = createFileRoute("/driver")({ ssr: false, component: DriverPage });
@@ -104,11 +107,14 @@ function DriverPage() {
   if (profile.status !== "active") {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
-        <Card className="p-6 max-w-md text-center">
-          <h2 className="text-xl font-bold">Cuenta {profile.status}</h2>
-          <p className="text-sm text-muted-foreground mt-2">Tu cuenta de chofer debe ser aprobada por un supervisor antes de operar.</p>
-          {profile.driver_code && <p className="mt-3 text-sm">Tu código: <strong>{profile.driver_code}</strong></p>}
-          <Button className="mt-4" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
+        <Card className="p-6 max-w-md w-full space-y-3">
+          <h2 className="text-xl font-bold text-center">Cuenta: {STATUS_LABELS[profile.status] ?? profile.status}</h2>
+          <p className="text-sm text-muted-foreground text-center">Tu cuenta de chofer debe ser aprobada por un supervisor antes de operar.</p>
+          {profile.driver_code && <p className="text-sm text-center">Tu código: <strong>{profile.driver_code}</strong></p>}
+          {profile.status === "rejected" && (
+            <ResubmitDocs profile={profile} onDone={refresh} />
+          )}
+          <Button className="w-full" variant="outline" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
             <LogOut className="w-4 h-4 mr-2" /> Cerrar sesión
           </Button>
         </Card>
@@ -125,12 +131,12 @@ function DriverPage() {
     <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4 relative">
       {/* Full-screen success overlay: no category, no amount */}
       {flash && (
-        <div className="fixed inset-0 z-50 bg-success/95 flex flex-col items-center justify-center text-center p-6">
-          <BadgeCheck className="w-20 h-20 text-white mb-4" />
-          <p className="text-3xl font-black text-white">¡Pago Recibido!</p>
-          <p className="text-2xl font-bold text-white mt-1">{lastTickets} Pasaje{lastTickets > 1 ? "s" : ""}</p>
-          <p className="text-white/80 mt-4 text-sm">Código de validación</p>
-          <p className="text-5xl font-black text-white tracking-widest tabular-nums">{lastCode}</p>
+        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center text-center p-6">
+          <BadgeCheck className="w-24 h-24 text-[#00FF66] mb-4" />
+          <p className="text-4xl font-black text-[#00FF66] uppercase tracking-wide">¡Pago Recibido!</p>
+          <p className="text-3xl font-black text-white mt-2">{lastTickets} Pasaje{lastTickets > 1 ? "s" : ""}</p>
+          <p className="text-white/70 mt-6 text-base uppercase tracking-[0.3em]">Código de validación</p>
+          <p className="text-[5.5rem] leading-none font-black text-[#00FF66] tracking-widest tabular-nums drop-shadow-[0_0_25px_rgba(0,255,102,0.6)]">{lastCode}</p>
         </div>
       )}
 
@@ -248,6 +254,70 @@ function DriverPage() {
           {txs.length === 0 && <p className="text-muted-foreground py-3">Aún no hay validaciones hoy.</p>}
         </div>
       </Card>
+    </div>
+  );
+}
+
+type DocKey = "ci_front" | "ci_back" | "selfie" | "license" | "union_doc";
+
+const DOC_LABELS: Record<DocKey, string> = {
+  ci_front: "CI Frontal",
+  ci_back: "CI Reverso",
+  selfie: "Selfie con CI",
+  license: "Licencia de Conducir",
+  union_doc: "Credencial de Línea / Carnet de Sindicato",
+};
+
+function ResubmitDocs({ profile, onDone }: { profile: { id: string; resubmission_count: number | null; rejection_reason: string | null }; onDone: () => void }) {
+  const [files, setFiles] = useState<Partial<Record<DocKey, Blob>>>({});
+  const [busy, setBusy] = useState(false);
+  const attempts = Number(profile.resubmission_count ?? 0);
+  const remaining = Math.max(0, 3 - attempts);
+
+  async function submit() {
+    const entries = Object.entries(files) as [DocKey, Blob][];
+    if (entries.length === 0) return toast.error("Sube al menos un documento corregido");
+    if (remaining === 0) return toast.error("Alcanzaste el límite de 3 reenvíos. Acércate a la oficina.");
+    setBusy(true);
+    try {
+      const updates: Record<string, unknown> = {
+        status: "pending",
+        rejection_reason: null,
+        resubmission_count: attempts + 1,
+      };
+      for (const [key, blob] of entries) {
+        const url = await uploadImage(supabase, "kyc-documents", `${profile.id}/${key}_r${attempts + 1}.jpg`, blob);
+        updates[`${key}_url`] = url;
+      }
+      const { error } = await supabase.from("profiles").update(updates as never).eq("id", profile.id);
+      if (error) throw error;
+      toast.success("Documentos reenviados. Tu cuenta volvió a revisión.");
+      setFiles({});
+      onDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al reenviar");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-3 text-left">
+      <div>
+        <p className="text-sm font-semibold text-destructive">Motivo del rechazo</p>
+        <p className="text-sm">{profile.rejection_reason ?? "El supervisor no registró un motivo."}</p>
+      </div>
+      <p className="text-xs text-muted-foreground">Reenvíos disponibles: <strong>{remaining}</strong> de 3</p>
+      {remaining > 0 ? (
+        <>
+          {(Object.keys(DOC_LABELS) as DocKey[]).map((k) => (
+            <FilePick key={k} label={DOC_LABELS[k]} file={files[k]} onFile={(f) => setFiles((p) => ({ ...p, [k]: f }))} />
+          ))}
+          <Button className="w-full" onClick={submit} disabled={busy}>
+            {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Reenviar documentos corregidos
+          </Button>
+        </>
+      ) : (
+        <p className="text-sm text-destructive">Alcanzaste el límite de 3 reenvíos. Acércate a la oficina para continuar el trámite.</p>
+      )}
     </div>
   );
 }
