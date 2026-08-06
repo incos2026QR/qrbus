@@ -21,18 +21,16 @@ let inflight: Promise<MapaTarifas> | null = null;
 export async function fetchTarifas(force = false): Promise<MapaTarifas> {
   if (cache && !force) return cache;
   if (inflight && !force) return inflight;
-  inflight = supabase
-    .from("tarifas")
-    .select("tipo, nombre, precio")
-    .then(({ data }) => {
-      const mapa: MapaTarifas = { ...TARIFAS_RESPALDO };
-      for (const t of data ?? []) {
-        mapa[t.tipo] = { tipo: t.tipo, nombre: t.nombre, precio: Number(t.precio) };
-      }
-      cache = mapa;
-      inflight = null;
-      return mapa;
-    });
+  inflight = (async () => {
+    const { data } = await supabase.from("tarifas").select("tipo, nombre, precio");
+    const mapa: MapaTarifas = { ...TARIFAS_RESPALDO };
+    for (const t of data ?? []) {
+      mapa[t.tipo] = { tipo: t.tipo, nombre: t.nombre, precio: Number(t.precio) };
+    }
+    cache = mapa;
+    inflight = null;
+    return mapa;
+  })();
   return inflight;
 }
 
