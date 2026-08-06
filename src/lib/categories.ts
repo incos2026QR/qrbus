@@ -2,38 +2,13 @@ export type Category = "general" | "primaria" | "secundaria" | "adulto_mayor" | 
 
 export const CATEGORY_LABELS: Record<Category, string> = {
   general: "General",
-  primaria: "Estudiantil (Escolar)",
-  secundaria: "Estudiante Universitario",
+  primaria: "Escolar",
+  secundaria: "Universitario",
   adulto_mayor: "Adulto Mayor",
   discapacidad: "Persona con Discapacidad",
 };
 
-export const CATEGORY_PRICES: Record<Category, number> = {
-  general: 3.0,
-  primaria: 1.0,
-  secundaria: 2.0,
-  adulto_mayor: 2.5,
-  discapacidad: 2.5,
-};
-
-// Legacy shape kept for admin overrides / display
-export const CATEGORIES: {
-  value: Category;
-  label: string;
-  price: number;
-  requiresExtraDoc?: (age: number) => boolean;
-  extraDocLabel?: string;
-}[] = (Object.keys(CATEGORY_LABELS) as Category[]).map((v) => ({
-  value: v,
-  label: CATEGORY_LABELS[v],
-  price: CATEGORY_PRICES[v],
-  requiresExtraDoc:
-    v === "secundaria" ? (age: number) => age >= 18 :
-    v === "discapacidad" ? () => true : undefined,
-  extraDocLabel:
-    v === "secundaria" ? "Carnet Universitario/Estudiantil" :
-    v === "discapacidad" ? "Carnet de Discapacidad" : undefined,
-}));
+export const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as Category[];
 
 export function computeAge(birthdate: string): number {
   const b = new Date(birthdate);
@@ -45,10 +20,10 @@ export function computeAge(birthdate: string): number {
 }
 
 /**
- * Smart selection by age. Returns:
- *  - forced: category is fixed by age (no user choice)
- *  - options: allowed categories (excluding disability, handled separately)
- *  - requiresUniversityDoc: if user picks "secundaria" in 18-27, they must upload student ID
+ * Selección inteligente por edad.
+ *  - forced: la categoría queda fija según la edad (sin elección del usuario)
+ *  - options: categorías permitidas (la discapacidad se maneja aparte)
+ *  - requiresUniversityDoc: si elige "secundaria" debe subir carnet estudiantil
  */
 export function ageBucket(age: number): {
   forced?: Category;
@@ -62,14 +37,20 @@ export function ageBucket(age: number): {
 }
 
 /**
- * Resolve final category considering disability. Always picks the cheapest fare.
+ * Resuelve la categoría final considerando discapacidad.
+ * Siempre asigna la tarifa más baja disponible; los precios llegan desde la
+ * tabla `tarifas` de la base de datos.
  */
-export function resolveCategory(age: number, chosen: Category, hasDisability: boolean): Category {
+export function resolveCategory(
+  age: number,
+  chosen: Category,
+  hasDisability: boolean,
+  precio: (c: Category) => number,
+): Category {
   const bucket = ageBucket(age);
-  const base: Category = bucket.forced ?? chosen ?? bucket.options[0];
+  const base: Category = bucket.forced ?? chosen ?? bucket.options[0]!;
   if (!hasDisability) return base;
-  // Compare base fare vs discapacidad (2.5) and pick the cheapest for passenger.
-  return CATEGORY_PRICES[base] <= CATEGORY_PRICES.discapacidad ? base : "discapacidad";
+  return precio(base) <= precio("discapacidad") ? base : "discapacidad";
 }
 
 export function qrColumnFor(category: Category): "qr_general_url" | "qr_primaria_url" | "qr_secundaria_url" | "qr_adulto_url" {
@@ -82,10 +63,24 @@ export function qrColumnFor(category: Category): "qr_general_url" | "qr_primaria
   }
 }
 
-// Kept for backward compatibility with the admin override select
 export function validateCategoryForAge(category: Category, age: number): string | null {
-  if (category === "primaria" && age > 17) return "Estudiantil solo hasta 17 años";
+  if (category === "primaria" && age > 17) return "Escolar solo hasta 17 años";
   if (category === "adulto_mayor" && age < 60) return "Adulto Mayor requiere 60+";
   if (category === "secundaria" && (age < 18 || age > 27)) return "Universitario entre 18 y 27";
   return null;
 }
+
+/** Etiquetas de estado de cuenta en español. */
+export const STATUS_LABELS: Record<string, string> = {
+  pending: "Pendiente de aprobación",
+  active: "Activo",
+  rejected: "Rechazado",
+  suspended: "Suspendido",
+};
+
+export const ROLE_LABELS: Record<string, string> = {
+  admin: "Administrador",
+  supervisor: "Supervisor",
+  driver: "Chofer",
+  passenger: "Pasajero",
+};
