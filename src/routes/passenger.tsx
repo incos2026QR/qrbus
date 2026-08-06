@@ -3,7 +3,8 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
-import { CATEGORY_LABELS, CATEGORY_PRICES, type Category } from "@/lib/categories";
+import { CATEGORY_LABELS, STATUS_LABELS, type Category } from "@/lib/categories";
+import { useTarifas } from "@/lib/tarifas";
 import { toAccountId, getCoords, payFare, topUp as bankTopUp } from "@/lib/bank";
 import { playSuccessChime } from "@/lib/sound";
 import { QrScanner } from "@/components/QrScanner";
@@ -36,10 +37,9 @@ const TARIFA_API_LABEL: Record<Category, string> = {
   discapacidad: "Adulto Mayor",
 };
 
-const GENERAL_PRICE = CATEGORY_PRICES.general;
-
 function PassengerPage() {
   const { profile, userId, loading, refresh } = useSession();
+  const { precio } = useTarifas();
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
@@ -81,7 +81,8 @@ function PassengerPage() {
   useEffect(() => { loadHistory(); }, [userId]);
 
   const balance = Number(profile?.balance ?? 0);
-  const basePrice = profile?.category ? CATEGORY_PRICES[profile.category] : GENERAL_PRICE;
+  const GENERAL_PRICE = precio("general");
+  const basePrice = precio(profile?.category ?? "general");
   const total = basePrice + (tickets - 1) * GENERAL_PRICE;
 
   async function findDriver(rawCode: string) {
@@ -103,7 +104,7 @@ function PassengerPage() {
       const { error } = await supabase.rpc("topup_wallet", { _amount: amount, _method: "qr" });
       if (error) throw error;
       if (profile?.bank_account) {
-        try { await bankTopUp(toAccountId(profile.bank_account), amount); } catch { /* API bancaria offline */ }
+        try { await bankTopUp(toAccountId(profile.bank_account), amount, profile.bank_name); } catch { /* API bancaria offline */ }
       }
       await refresh();
       playSuccessChime();
@@ -142,7 +143,7 @@ function PassengerPage() {
             cantidadPasajes: tickets,
             latitud: coords.latitud,
             longitud: coords.longitud,
-          });
+          }, profile.bank_name);
         } catch (apiErr) {
           toast.warning(apiErr instanceof Error ? apiErr.message : "El banco no respondió");
         }
@@ -166,7 +167,7 @@ function PassengerPage() {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
         <Card className="p-6 max-w-md text-center">
-          <h2 className="text-xl font-bold">Cuenta {profile.status}</h2>
+          <h2 className="text-xl font-bold">Cuenta: {STATUS_LABELS[profile.status] ?? profile.status}</h2>
           <p className="text-sm text-muted-foreground mt-2">Tu cuenta debe ser aprobada por un supervisor antes de usar el servicio.</p>
           <Button className="mt-4" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
             <LogOut className="w-4 h-4 mr-2" /> Cerrar sesión

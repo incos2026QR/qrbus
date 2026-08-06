@@ -17,7 +17,8 @@ import { Input } from "@/components/ui/input";
 import { toAccountId } from "@/lib/bank";
 import * as XLSX from "xlsx";
 import { grantRole } from "@/lib/auth.functions";
-import { CATEGORY_LABELS, CATEGORY_PRICES, type Category } from "@/lib/categories";
+import { CATEGORY_LABELS, STATUS_LABELS, type Category } from "@/lib/categories";
+import { useTarifas } from "@/lib/tarifas";
 
 export const Route = createFileRoute("/admin")({ ssr: false, component: AdminPage });
 
@@ -111,6 +112,8 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
   const [selected, setSelected] = useState<Profile | null>(null);
   const [overrideCategory, setOverrideCategory] = useState<Category | "">("");
   const [bankAccount, setBankAccount] = useState("");
+  const [rejectionReason, setRejectionReason] = useState("");
+  const { precio } = useTarifas();
 
   async function load() {
     const { data } = await supabase.from("profiles").select("*").eq("role", role).order("created_at", { ascending: false });
@@ -121,6 +124,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
   useEffect(() => {
     setOverrideCategory((selected?.category as Category | null) ?? "");
     setBankAccount(selected?.bank_account ?? "");
+    setRejectionReason(selected?.rejection_reason ?? "");
   }, [selected]);
 
   async function saveBankAccount() {
@@ -142,11 +146,20 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
   }
 
   async function updateStatus(id: string, status: Profile["status"]) {
-    // Save category override alongside status changes if it differs
-    const updates: Partial<Profile> = { status };
+    // Guarda la categoría corregida junto con el cambio de estado
+    const updates: {
+      status: Profile["status"];
+      category?: Category;
+      rejection_reason?: string | null;
+    } = { status };
     if (selected && overrideCategory && overrideCategory !== selected.category) {
       updates.category = overrideCategory;
     }
+    if (status === "rejected") {
+      if (!rejectionReason.trim()) return toast.error("Escribe el motivo del rechazo");
+      updates.rejection_reason = rejectionReason.trim();
+    }
+    if (status === "active") updates.rejection_reason = null;
     const { error } = await supabase.from("profiles").update(updates).eq("id", id);
     if (error) return toast.error(error.message);
     toast.success("Estado actualizado");
@@ -189,7 +202,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto w-[95vw]">
-          <DialogHeader><DialogTitle>Revisión KYC</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Revisión de verificación de identidad</DialogTitle></DialogHeader>
           {selected && (
             <div className="space-y-4">
               <div className="text-sm space-y-1">
@@ -197,6 +210,11 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                 <p><strong>CI:</strong> {selected.ci_number} · <strong>Nacimiento:</strong> {selected.birthdate}</p>
                 <p><strong>Teléfono:</strong> {selected.phone} · <strong>Email:</strong> {selected.email}</p>
                 {selected.driver_code && <p><strong>Código chofer:</strong> {selected.driver_code}</p>}
+                {selected.transport_line && <p><strong>Línea:</strong> {selected.transport_line}</p>}
+                {selected.bank_name && <p><strong>Banco:</strong> {selected.bank_name}</p>}
+                {selected.role === "driver" && (
+                  <p><strong>Reenvíos de documentos:</strong> {selected.resubmission_count ?? 0} / 3</p>
+                )}
                 <p><strong>Saldo:</strong> Bs {Number(selected.balance ?? 0).toFixed(2)}</p>
               </div>
 
@@ -217,7 +235,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                       <SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger>
                       <SelectContent>
                         {(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => (
-                          <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]} — Bs {CATEGORY_PRICES[c].toFixed(2)}</SelectItem>
+                          <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]} — Bs {precio(c).toFixed(2)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -234,8 +252,20 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                 <ImagePreview label="CI Reverso" path={selected.ci_back_url} bucket="kyc-documents" />
                 <ImagePreview label="Selfie" path={selected.selfie_url} bucket="kyc-documents" />
                 {selected.license_url && <ImagePreview label="Licencia" path={selected.license_url} bucket="kyc-documents" />}
+                {selected.union_doc_url && <ImagePreview label="Credencial de Línea / Sindicato" path={selected.union_doc_url} bucket="kyc-documents" />}
                 {selected.extra_doc_url && <ImagePreview label="Documento adicional" path={selected.extra_doc_url} bucket="kyc-documents" />}
               </div>
+              <div className="rounded-md border p-3 space-y-2">
+                <p className="text-sm font-semibold">Motivo de rechazo</p>
+                <Textarea
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="Ej. La foto del CI está borrosa, vuelve a subirla."
+                  rows={2}
+                />
+                <p className="text-xs text-muted-foreground">Obligatorio al rechazar. El usuario lo verá al iniciar sesión.</p>
+              </div>
+
               <div className="flex flex-wrap gap-2 pt-2">
                 <Button onClick={() => updateStatus(selected.id, "active")} className="bg-success text-success-foreground">
                   <CheckCircle2 className="w-4 h-4 mr-1" /> Aprobar
@@ -262,7 +292,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
 
 function StatusBadge({ status }: { status: Profile["status"] }) {
   const map = { pending: "secondary", active: "default", rejected: "destructive", suspended: "outline" } as const;
-  return <Badge variant={map[status]}>{status}</Badge>;
+  return <Badge variant={map[status]}>{STATUS_LABELS[status] ?? status}</Badge>;
 }
 
 function ImagePreview({ label, path, bucket }: { label: string; path: string | null; bucket: string }) {

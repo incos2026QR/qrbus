@@ -50,7 +50,7 @@ function LoginPage() {
         <Card className="p-4 sm:p-6 max-w-full overflow-hidden">
           <Tabs defaultValue="login">
             <TabsList className="grid grid-cols-3 w-full">
-              <TabsTrigger value="login"><LogIn className="w-4 h-4 mr-1" /> Login</TabsTrigger>
+              <TabsTrigger value="login"><LogIn className="w-4 h-4 mr-1" /> Ingresar</TabsTrigger>
               <TabsTrigger value="passenger"><UserPlus className="w-4 h-4 mr-1" /> Pasajero</TabsTrigger>
               <TabsTrigger value="driver"><Bus className="w-4 h-4 mr-1" /> Chofer</TabsTrigger>
             </TabsList>
@@ -93,7 +93,7 @@ function LoginForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div>
-        <Label>Email o Teléfono</Label>
+        <Label>Correo electrónico o teléfono</Label>
         <Input value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="tu@correo.com o 70000000" required />
       </div>
       <div>

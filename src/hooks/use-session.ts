@@ -24,8 +24,12 @@ export type Profile = {
   qr_secundaria_url: string | null;
   qr_adulto_url: string | null;
   bank_account: string | null;
+  bank_name: string | null;
+  transport_line: string | null;
+  union_doc_url: string | null;
+  rejection_reason: string | null;
+  resubmission_count: number;
   balance: number;
-
 };
 
 export function useSession() {
