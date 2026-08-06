@@ -147,7 +147,11 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
 
   async function updateStatus(id: string, status: Profile["status"]) {
     // Guarda la categoría corregida junto con el cambio de estado
-    const updates: Record<string, unknown> = { status };
+    const updates: {
+      status: Profile["status"];
+      category?: Category;
+      rejection_reason?: string | null;
+    } = { status };
     if (selected && overrideCategory && overrideCategory !== selected.category) {
       updates.category = overrideCategory;
     }
