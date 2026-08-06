@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           balance: number
           bank_account: string | null
+          bank_name: string | null
           birthdate: string | null
           category: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url: string | null
@@ -37,13 +38,18 @@ export type Database = {
           qr_general_url: string | null
           qr_primaria_url: string | null
           qr_secundaria_url: string | null
+          rejection_reason: string | null
+          resubmission_count: number
           role: Database["public"]["Enums"]["app_role"]
           selfie_url: string | null
           status: Database["public"]["Enums"]["user_status"]
+          transport_line: string | null
+          union_doc_url: string | null
         }
         Insert: {
           balance?: number
           bank_account?: string | null
+          bank_name?: string | null
           birthdate?: string | null
           category?: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url?: string | null
@@ -63,13 +69,18 @@ export type Database = {
           qr_general_url?: string | null
           qr_primaria_url?: string | null
           qr_secundaria_url?: string | null
+          rejection_reason?: string | null
+          resubmission_count?: number
           role?: Database["public"]["Enums"]["app_role"]
           selfie_url?: string | null
           status?: Database["public"]["Enums"]["user_status"]
+          transport_line?: string | null
+          union_doc_url?: string | null
         }
         Update: {
           balance?: number
           bank_account?: string | null
+          bank_name?: string | null
           birthdate?: string | null
           category?: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url?: string | null
@@ -89,9 +100,13 @@ export type Database = {
           qr_general_url?: string | null
           qr_primaria_url?: string | null
           qr_secundaria_url?: string | null
+          rejection_reason?: string | null
+          resubmission_count?: number
           role?: Database["public"]["Enums"]["app_role"]
           selfie_url?: string | null
           status?: Database["public"]["Enums"]["user_status"]
+          transport_line?: string | null
+          union_doc_url?: string | null
         }
         Relationships: []
       }
@@ -140,6 +155,33 @@ export type Database = {
           transaction_id?: string | null
           updated_at?: string
           validation_code?: string | null
+        }
+        Relationships: []
+      }
+      tarifas: {
+        Row: {
+          created_at: string
+          id: string
+          nombre: string
+          precio: number
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          nombre: string
+          precio: number
+          tipo: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          nombre?: string
+          precio?: number
+          tipo?: string
+          updated_at?: string
         }
         Relationships: []
       }
