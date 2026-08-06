@@ -396,11 +396,6 @@ function ReportsPanel() {
                 <p><strong>Fecha:</strong> {new Date(selected.created_at).toLocaleString()}</p>
                 <p><strong>Estado:</strong> {selected.status}</p>
                 {selected.driver_code && <p><strong>Código chofer:</strong> {selected.driver_code}</p>}
-                {selected.transport_line && <p><strong>Línea:</strong> {selected.transport_line}</p>}
-                {selected.bank_name && <p><strong>Banco:</strong> {selected.bank_name}</p>}
-                {selected.role === "driver" && (
-                  <p><strong>Reenvíos de documentos:</strong> {selected.resubmission_count ?? 0} / 3</p>
-                )}
                 {selected.validation_code && <p><strong>Código de validación:</strong> {selected.validation_code}</p>}
               </div>
               <div>
