@@ -14,11 +14,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { LogOut, Users, Bus, Shield, BarChart3, CheckCircle2, XCircle, Ban, ArrowUp, Menu, Receipt, MapPin, Download } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { toAccountId } from "@/lib/bank";
+import { cleanAccount, formatAccount } from "@/lib/bank";
 import * as XLSX from "xlsx";
-import { grantRole } from "@/lib/auth.functions";
-import { CATEGORY_LABELS, STATUS_LABELS, type Category } from "@/lib/categories";
+import { grantRole, createSupervisor } from "@/lib/auth.functions";
+import { STATUS_LABELS, ALL_CATEGORIES, type Category } from "@/lib/categories";
 import { useTarifas } from "@/lib/tarifas";
+import { useBancos } from "@/lib/catalogs";
+
 
 export const Route = createFileRoute("/admin")({ ssr: false, component: AdminPage });
 
