@@ -9,13 +9,11 @@ import { toast } from "sonner";
 import { Loader2, Sparkles, Upload, Check } from "lucide-react";
 import { signUpAutoConfirm } from "@/lib/auth.functions";
 import { uploadImage, makeSampleImage } from "@/lib/image";
-import { toAccountId, createAccount, BANCOS } from "@/lib/bank";
+import { cleanAccount, formatAccount, createAccount } from "@/lib/bank";
+import { useBancos } from "@/lib/catalogs";
 import { useTarifas } from "@/lib/tarifas";
 import { Captcha } from "@/components/Captcha";
-import {
-  CATEGORY_LABELS,
-  computeAge, ageBucket, resolveCategory, type Category,
-} from "@/lib/categories";
+import { computeAge, ageBucket, resolveCategory, type Category } from "@/lib/categories";
 
 const DEMO_PASSWORD = "Password123!";
 
@@ -52,7 +50,8 @@ export function PassengerRegister() {
   const [s, setS] = useState<FormState>(initial);
   const [busy, setBusy] = useState(false);
   const [captchaOk, setCaptchaOk] = useState(false);
-  const { precio } = useTarifas();
+  const { precio, error: tarifasError } = useTarifas();
+  const { bancos, error: bancosError, validarCuenta } = useBancos();
 
   function autofill() {
     setS((p) => ({
@@ -66,7 +65,7 @@ export function PassengerRegister() {
       ci_number: "" + Math.floor(1000000 + Math.random() * 8999999),
       birthdate: "1995-06-15",
       bank_account: `${Math.floor(100000 + Math.random() * 899999)}`,
-      bank_name: "Banco Nacional de Bolivia (BNB)",
+      bank_name: bancos[0]?.nombre ?? "",
       chosen: "general",
       hasDisability: false,
       files: {
@@ -85,6 +84,11 @@ export function PassengerRegister() {
     if (s.step === 2) {
       if (!s.first_name || !s.paternal_surname || !s.ci_number || !s.birthdate)
         return toast.error("Completa todos los campos");
+      if (!s.bank_name) return toast.error("Selecciona tu banco");
+      const cuenta = cleanAccount(s.bank_account);
+      if (!cuenta) return toast.error("Ingresa tu número de cuenta (solo dígitos)");
+      const err = validarCuenta(s.bank_name, cuenta);
+      if (err) return toast.error(err);
     }
     if (s.step === 3) {
       if (!s.files.ci_front || !s.files.ci_back || !s.files.selfie)
@@ -109,12 +113,14 @@ export function PassengerRegister() {
     }
 
     if (!s.bank_name) return toast.error("Selecciona tu banco");
-    if (!s.bank_account.trim()) return toast.error("Ingresa tu número de cuenta");
+    const cuenta = cleanAccount(s.bank_account);
+    if (!cuenta) return toast.error("Ingresa tu número de cuenta");
+    const cuentaErr = validarCuenta(s.bank_name, cuenta);
+    if (cuentaErr) return toast.error(cuentaErr);
 
     setBusy(true);
     try {
       const email = s.email || `${s.phone}@pagojusto.bo`;
-      const accountId = toAccountId(s.bank_account);
       const { userId } = await signUpAutoConfirm({ data: { email, password: s.password, phone: s.phone } });
       const { error: signIn } = await supabase.auth.signInWithPassword({ email, password: s.password });
       if (signIn) throw signIn;
@@ -123,7 +129,7 @@ export function PassengerRegister() {
       uploads.ci_front_url = await uploadImage(supabase, "kyc-documents", `${userId}/ci_front.jpg`, s.files.ci_front!);
       uploads.ci_back_url = await uploadImage(supabase, "kyc-documents", `${userId}/ci_back.jpg`, s.files.ci_back!);
       uploads.selfie_url = await uploadImage(supabase, "kyc-documents", `${userId}/selfie.jpg`, s.files.selfie!);
-      // extra_doc_url stores the disability card if present; otherwise university ID.
+      // extra_doc_url guarda el carnet de discapacidad o, en su defecto, el estudiantil.
       const extra = s.files.disability ?? s.files.university;
       if (extra) {
         uploads.extra_doc_url = await uploadImage(supabase, "kyc-documents", `${userId}/extra.jpg`, extra);
@@ -141,18 +147,18 @@ export function PassengerRegister() {
         phone: s.phone,
         email,
         category: finalCategory,
-        bank_account: accountId,
+        bank_account: cuenta,
         bank_name: s.bank_name,
         ...uploads,
       });
-      if (profErr) throw profErr;
+      if (profErr) throw new Error(`No se pudo crear el perfil: ${profErr.message}`);
       await supabase.from("user_roles").insert({ user_id: userId, role: "passenger" });
       try {
-        await createAccount(accountId, `${s.first_name} ${s.paternal_surname}`.trim(), s.bank_name);
+        await createAccount(cuenta, `${s.first_name} ${s.paternal_surname}`.trim(), s.bank_name);
       } catch {
         /* la cuenta ya podría existir en el banco */
       }
-      toast.success(`Registro exitoso (${accountId}). Cuenta pendiente de aprobación.`);
+      toast.success(`Registro exitoso. ${formatAccount(s.bank_name, cuenta)}. Cuenta pendiente de aprobación.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error");
     } finally { setBusy(false); }
@@ -160,6 +166,11 @@ export function PassengerRegister() {
 
   return (
     <div className="space-y-4 max-w-full">
+      {(tarifasError || bancosError) && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          No se pudieron cargar los datos de tarifas o bancos. Intenta nuevamente más tarde.
+        </div>
+      )}
       <div>
         <Button type="button" variant="outline" onClick={autofill} className="w-full border-primary text-primary">
           <Sparkles className="w-4 h-4 mr-2" /> Cargar Datos de Prueba
@@ -194,14 +205,19 @@ export function PassengerRegister() {
             <Select value={s.bank_name} onValueChange={(v) => setS({...s, bank_name: v})}>
               <SelectTrigger><SelectValue placeholder="Selecciona tu banco" /></SelectTrigger>
               <SelectContent>
-                {BANCOS.map((b) => <SelectItem key={b.id} value={b.nombre}>{b.nombre}</SelectItem>)}
+                {bancos.map((b) => <SelectItem key={b.id} value={b.nombre}>{b.nombre}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div>
             <Label>Número de cuenta *</Label>
-            <Input value={s.bank_account} onChange={(e) => setS({...s, bank_account: e.target.value})} placeholder="Ej. 104578" />
-            <p className="text-xs text-muted-foreground mt-1">Cuenta bancaria: <strong>{toAccountId(s.bank_account) || "CTA-…"}</strong></p>
+            <Input
+              inputMode="numeric"
+              value={s.bank_account}
+              onChange={(e) => setS({...s, bank_account: cleanAccount(e.target.value)})}
+              placeholder="Ej. 104578"
+            />
+            <p className="text-xs text-muted-foreground mt-1">{formatAccount(s.bank_name, s.bank_account)}</p>
           </div>
         </div>
       )}
@@ -234,7 +250,7 @@ export function PassengerRegister() {
 }
 
 function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
-  const { precio } = useTarifas();
+  const { precio, nombre } = useTarifas();
   const age = s.birthdate ? computeAge(s.birthdate) : 0;
   const bucket = ageBucket(age);
   const chosen = bucket.forced ?? s.chosen;
@@ -247,7 +263,7 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
 
       {bucket.forced ? (
         <div className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
-          Asignación automática: <strong>{CATEGORY_LABELS[bucket.forced]}</strong> — Bs {precio(bucket.forced).toFixed(2)}
+          Asignación automática: <strong>{nombre(bucket.forced)}</strong> — Bs {precio(bucket.forced).toFixed(2)}
         </div>
       ) : (
         <>
@@ -256,7 +272,7 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               {bucket.options.map((c) => (
-                <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]} — Bs {precio(c).toFixed(2)}</SelectItem>
+                <SelectItem key={c} value={c}>{nombre(c)} — Bs {precio(c).toFixed(2)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -282,7 +298,7 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
       )}
 
       <div className="rounded-md bg-accent/40 p-3 text-sm">
-        Tarifa final asignada: <strong>{CATEGORY_LABELS[finalCategory]}</strong> — <strong>Bs {precio(finalCategory).toFixed(2)}</strong>
+        Tarifa final asignada: <strong>{nombre(finalCategory)}</strong> — <strong>Bs {precio(finalCategory).toFixed(2)}</strong>
       </div>
     </div>
   );

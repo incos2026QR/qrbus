@@ -3,9 +3,11 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
-import { CATEGORY_LABELS, STATUS_LABELS, type Category } from "@/lib/categories";
+import { STATUS_LABELS, isActiveStatus, isBlockedStatus, type Category } from "@/lib/categories";
+import { ResubmitDocs, PASSENGER_DOCS } from "@/components/ResubmitDocs";
 import { useTarifas } from "@/lib/tarifas";
-import { toAccountId, getCoords, payFare, topUp as bankTopUp } from "@/lib/bank";
+import { cleanAccount, getCoords, payFare, topUp as bankTopUp } from "@/lib/bank";
+
 import { playSuccessChime } from "@/lib/sound";
 import { QrScanner } from "@/components/QrScanner";
 import { Button } from "@/components/ui/button";
@@ -29,17 +31,9 @@ type DriverInfo = {
 
 type MyTx = { id: string; verification_code: string; tickets: number; created_at: string };
 
-const TARIFA_API_LABEL: Record<Category, string> = {
-  general: "General",
-  primaria: "Estudiante",
-  secundaria: "Estudiante",
-  adulto_mayor: "Adulto Mayor",
-  discapacidad: "Adulto Mayor",
-};
-
 function PassengerPage() {
   const { profile, userId, loading, refresh } = useSession();
-  const { precio } = useTarifas();
+  const { precio, nombre, error: tarifasError } = useTarifas();
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
@@ -104,7 +98,7 @@ function PassengerPage() {
       const { error } = await supabase.rpc("topup_wallet", { _amount: amount, _method: "qr" });
       if (error) throw error;
       if (profile?.bank_account) {
-        try { await bankTopUp(toAccountId(profile.bank_account), amount, profile.bank_name); } catch { /* API bancaria offline */ }
+        try { await bankTopUp(cleanAccount(profile.bank_account), amount, profile.bank_name); } catch { /* API bancaria offline */ }
       }
       await refresh();
       playSuccessChime();
@@ -136,10 +130,10 @@ function PassengerPage() {
       if (profile.bank_account && driver.bank_account) {
         try {
           await payFare({
-            cuentaOrigen: toAccountId(profile.bank_account),
-            cuentaDestino: toAccountId(driver.bank_account),
+            cuentaOrigen: cleanAccount(profile.bank_account),
+            cuentaDestino: cleanAccount(driver.bank_account),
             monto: Number(row.total),
-            tarifaTipo: TARIFA_API_LABEL[(row.category as Category) ?? "general"],
+            tarifaTipo: nombre((row.category as Category) ?? "general"),
             cantidadPasajes: tickets,
             latitud: coords.latitud,
             longitud: coords.longitud,
@@ -163,19 +157,23 @@ function PassengerPage() {
 
   if (loading || !profile) return <div className="p-8">Cargando...</div>;
 
-  if (profile.status !== "active") {
+  if (!isActiveStatus(profile.status)) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
-        <Card className="p-6 max-w-md text-center">
-          <h2 className="text-xl font-bold">Cuenta: {STATUS_LABELS[profile.status] ?? profile.status}</h2>
-          <p className="text-sm text-muted-foreground mt-2">Tu cuenta debe ser aprobada por un supervisor antes de usar el servicio.</p>
-          <Button className="mt-4" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
+        <Card className="p-6 max-w-md w-full text-center space-y-3">
+          <h2 className="text-xl font-bold">Cuenta: {STATUS_LABELS[String(profile.status).toLowerCase()] ?? profile.status}</h2>
+          <p className="text-sm text-muted-foreground">Tu cuenta debe ser aprobada por un supervisor antes de usar el servicio.</p>
+          {isBlockedStatus(profile.status) && (
+            <ResubmitDocs profile={profile} docs={PASSENGER_DOCS} onDone={refresh} />
+          )}
+          <Button className="w-full" variant="outline" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
             <LogOut className="w-4 h-4 mr-2" /> Cerrar sesión
           </Button>
         </Card>
       </div>
     );
   }
+
 
   if (pass) {
     return (
@@ -198,6 +196,11 @@ function PassengerPage() {
 
   return (
     <div className="min-h-screen bg-background p-4 max-w-md mx-auto">
+      {tarifasError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive mb-2">
+          No se pudieron cargar las tarifas. Intenta nuevamente más tarde.
+        </div>
+      )}
       <header className="flex items-center justify-between py-3">
         <div>
           <h1 className="font-bold text-lg">Hola, {profile.first_name}</h1>
@@ -296,7 +299,7 @@ function PassengerPage() {
                 </Button>
               </div>
               <div className="mt-3 text-sm space-y-1">
-                <div className="flex justify-between"><span>1 {profile.category ? CATEGORY_LABELS[profile.category] : "General"}</span><span>Bs {basePrice.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>1 {nombre(profile.category ?? "general")}</span><span>Bs {basePrice.toFixed(2)}</span></div>
                 {tickets > 1 && <div className="flex justify-between"><span>{tickets - 1} General</span><span>Bs {((tickets - 1) * GENERAL_PRICE).toFixed(2)}</span></div>}
                 <div className="flex justify-between font-bold border-t pt-1"><span>Total</span><span>Bs {total.toFixed(2)}</span></div>
               </div>

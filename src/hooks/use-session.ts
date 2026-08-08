@@ -36,12 +36,15 @@ export function useSession() {
   const [userId, setUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [missingProfile, setMissingProfile] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     async function loadProfile(uid: string) {
       const { data } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
-      if (mounted) setProfile((data as Profile | null) ?? null);
+      if (!mounted) return;
+      setProfile((data as Profile | null) ?? null);
+      setMissingProfile(!data);
     }
 
     supabase.auth.getSession().then(({ data }) => {
@@ -67,5 +70,5 @@ export function useSession() {
     setProfile((data as Profile | null) ?? null);
   };
 
-  return { userId, profile, loading, refresh };
+  return { userId, profile, loading, missingProfile, refresh };
 }
