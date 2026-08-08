@@ -157,19 +157,23 @@ function PassengerPage() {
 
   if (loading || !profile) return <div className="p-8">Cargando...</div>;
 
-  if (profile.status !== "active") {
+  if (!isActiveStatus(profile.status)) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
-        <Card className="p-6 max-w-md text-center">
-          <h2 className="text-xl font-bold">Cuenta: {STATUS_LABELS[profile.status] ?? profile.status}</h2>
-          <p className="text-sm text-muted-foreground mt-2">Tu cuenta debe ser aprobada por un supervisor antes de usar el servicio.</p>
-          <Button className="mt-4" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
+        <Card className="p-6 max-w-md w-full text-center space-y-3">
+          <h2 className="text-xl font-bold">Cuenta: {STATUS_LABELS[String(profile.status).toLowerCase()] ?? profile.status}</h2>
+          <p className="text-sm text-muted-foreground">Tu cuenta debe ser aprobada por un supervisor antes de usar el servicio.</p>
+          {isBlockedStatus(profile.status) && (
+            <ResubmitDocs profile={profile} docs={PASSENGER_DOCS} onDone={refresh} />
+          )}
+          <Button className="w-full" variant="outline" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
             <LogOut className="w-4 h-4 mr-2" /> Cerrar sesión
           </Button>
         </Card>
       </div>
     );
   }
+
 
   if (pass) {
     return (
