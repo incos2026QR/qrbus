@@ -187,11 +187,14 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
   return (
     <Card className="p-4 max-w-full overflow-hidden">
       <h2 className="text-xl font-bold capitalize mb-3">{role === "driver" ? "Choferes" : role === "passenger" ? "Pasajeros" : "Supervisores"}</h2>
+      {isSupervisors && <AddSupervisor onCreated={load} />}
       <Tabs value={subtab} onValueChange={(v) => setSubtab(v as "pending" | "active")}>
-        <TabsList>
-          <TabsTrigger value="pending">Pendientes ({rows.filter(r=>r.status==="pending").length})</TabsTrigger>
-          <TabsTrigger value="active">Inscritos / Activos</TabsTrigger>
-        </TabsList>
+        {!isSupervisors && (
+          <TabsList>
+            <TabsTrigger value="pending">Pendientes ({rows.filter(r=>r.status==="pending").length})</TabsTrigger>
+            <TabsTrigger value="active">Inscritos / Activos</TabsTrigger>
+          </TabsList>
+        )}
         <TabsContent value={subtab} className="mt-3">
           {filtered.length === 0 && <p className="text-sm text-muted-foreground p-4">Sin registros.</p>}
           <div className="divide-y overflow-x-auto">
@@ -304,6 +307,47 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
         </DialogContent>
       </Dialog>
     </Card>
+  );
+}
+
+function AddSupervisor({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [surname, setSurname] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function create() {
+    if (!email.trim() || password.length < 6 || !firstName.trim())
+      return toast.error("Completa correo, nombre y una contraseña de 6+ caracteres");
+    setBusy(true);
+    try {
+      await createSupervisor({ data: { email: email.trim(), password, first_name: firstName.trim(), paternal_surname: surname.trim() } });
+      toast.success("Supervisor creado");
+      setOpen(false); setEmail(""); setPassword(""); setFirstName(""); setSurname("");
+      onCreated();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo crear el supervisor");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mb-3">
+      <Button size="sm" onClick={() => setOpen(true)}>+ Agregar Supervisor</Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Nuevo supervisor</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Correo electrónico" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Input placeholder="Contraseña" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Input placeholder="Nombres" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            <Input placeholder="Apellido paterno" value={surname} onChange={(e) => setSurname(e.target.value)} />
+            <Button className="w-full" onClick={create} disabled={busy}>Crear supervisor</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
