@@ -196,6 +196,11 @@ function PassengerPage() {
 
   return (
     <div className="min-h-screen bg-background p-4 max-w-md mx-auto">
+      {tarifasError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive mb-2">
+          No se pudieron cargar las tarifas. Intenta nuevamente más tarde.
+        </div>
+      )}
       <header className="flex items-center justify-between py-3">
         <div>
           <h1 className="font-bold text-lg">Hola, {profile.first_name}</h1>
