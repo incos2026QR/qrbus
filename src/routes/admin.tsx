@@ -109,13 +109,16 @@ function NavBtn({ active, onClick, icon, children }: { active: boolean; onClick:
 }
 
 function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "passenger" | "supervisor"; onChange: () => void; allowPromote?: boolean }) {
-  const [subtab, setSubtab] = useState<"pending" | "active">("pending");
+  const isSupervisors = role === "supervisor";
+  const [subtab, setSubtab] = useState<"pending" | "active">(isSupervisors ? "active" : "pending");
   const [rows, setRows] = useState<Profile[]>([]);
   const [selected, setSelected] = useState<Profile | null>(null);
   const [overrideCategory, setOverrideCategory] = useState<Category | "">("");
   const [bankAccount, setBankAccount] = useState("");
+  const [bankName, setBankName] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
-  const { precio } = useTarifas();
+  const { precio, nombre } = useTarifas();
+  const { bancos } = useBancos();
 
   async function load() {
     const { data } = await supabase.from("profiles").select("*").eq("role", role).order("created_at", { ascending: false });
@@ -125,19 +128,25 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
 
   useEffect(() => {
     setOverrideCategory((selected?.category as Category | null) ?? "");
-    setBankAccount(selected?.bank_account ?? "");
+    setBankAccount(cleanAccount(selected?.bank_account ?? ""));
+    setBankName(selected?.bank_name ?? "");
     setRejectionReason(selected?.rejection_reason ?? "");
   }, [selected]);
 
   async function saveBankAccount() {
     if (!selected) return;
-    const { error } = await supabase.from("profiles").update({ bank_account: toAccountId(bankAccount) }).eq("id", selected.id);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ bank_account: cleanAccount(bankAccount), bank_name: bankName || null })
+      .eq("id", selected.id);
     if (error) return toast.error(error.message);
-    toast.success("Cuenta bancaria actualizada");
+    toast.success("Datos bancarios actualizados");
     load();
   }
 
-  const filtered = rows.filter((r) => subtab === "pending" ? r.status === "pending" : r.status !== "pending");
+  const filtered = isSupervisors
+    ? rows.filter((r) => String(r.status).toLowerCase() === "active")
+    : rows.filter((r) => (subtab === "pending" ? r.status === "pending" : r.status !== "pending"));
 
   async function saveCategory() {
     if (!selected || !overrideCategory) return;
@@ -223,10 +232,16 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
               <div className="rounded-md border p-3 space-y-2">
                 <p className="text-sm font-semibold">Banco y número de cuenta</p>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <Input value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Ej. BNB - 104578" />
-                  <Button variant="secondary" onClick={saveBankAccount} disabled={!bankAccount.trim()}>Guardar cuenta</Button>
+                  <Select value={bankName} onValueChange={setBankName}>
+                    <SelectTrigger><SelectValue placeholder="Selecciona el banco" /></SelectTrigger>
+                    <SelectContent>
+                      {bancos.map((b) => <SelectItem key={b.id} value={b.nombre}>{b.nombre}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input inputMode="numeric" value={bankAccount} onChange={(e) => setBankAccount(cleanAccount(e.target.value))} placeholder="Ej. 104578" />
+                  <Button variant="secondary" onClick={saveBankAccount} disabled={!bankAccount.trim() || !bankName}>Guardar</Button>
                 </div>
-                <p className="text-xs text-muted-foreground">Cuenta: <strong>{toAccountId(bankAccount) || "—"}</strong></p>
+                <p className="text-xs text-muted-foreground">{formatAccount(bankName, bankAccount)}</p>
               </div>
 
               {selected.role === "passenger" && (
@@ -236,8 +251,8 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                     <Select value={overrideCategory} onValueChange={(v) => setOverrideCategory(v as Category)}>
                       <SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger>
                       <SelectContent>
-                        {(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => (
-                          <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]} — Bs {precio(c).toFixed(2)}</SelectItem>
+                        {ALL_CATEGORIES.map((c) => (
+                          <SelectItem key={c} value={c}>{nombre(c)} — Bs {precio(c).toFixed(2)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -245,7 +260,7 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                       Guardar categoría
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">Actual: {selected.category ? CATEGORY_LABELS[selected.category as Category] : "—"}</p>
+                  <p className="text-xs text-muted-foreground">Actual: {selected.category ? nombre(selected.category as Category) : "—"}</p>
                 </div>
               )}
 
@@ -462,6 +477,7 @@ type TxRow = {
 };
 
 function TransactionsPanel() {
+  const { nombre } = useTarifas();
   const [rows, setRows] = useState<TxRow[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
 
@@ -488,7 +504,7 @@ function TransactionsPanel() {
       "Código validación": t.verification_code,
       Pasajero: names[t.passenger_id] ?? t.passenger_id,
       Chofer: names[t.driver_id] ?? t.driver_id,
-      Tarifa: CATEGORY_LABELS[t.category as Category] ?? t.category,
+      Tarifa: nombre(t.category),
       Pasajes: t.tickets,
       "Monto (Bs)": Number(t.amount),
       Latitud: t.latitude ?? "",
@@ -533,7 +549,7 @@ function TransactionsPanel() {
                 <td className="py-2 pr-3 font-mono">{t.verification_code}</td>
                 <td className="py-2 pr-3">{names[t.passenger_id] ?? "—"}</td>
                 <td className="py-2 pr-3">{names[t.driver_id] ?? "—"}</td>
-                <td className="py-2 pr-3">{CATEGORY_LABELS[t.category as Category] ?? t.category}</td>
+                <td className="py-2 pr-3">{nombre(t.category)}</td>
                 <td className="py-2 pr-3">{t.tickets}</td>
                 <td className="py-2 pr-3">Bs {Number(t.amount).toFixed(2)}</td>
                 <td className="py-2 pr-3">
