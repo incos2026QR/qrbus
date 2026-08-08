@@ -12,11 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { LogOut, Circle, Flag, Wallet, Loader2, BadgeCheck, Banknote, Bluetooth, BluetoothConnected } from "lucide-react";
 import { isBluetoothSupported, linkHardware, sendPaymentOk } from "@/lib/bluetooth";
-import { toAccountId } from "@/lib/bank";
-import { STATUS_LABELS } from "@/lib/categories";
-import { FilePick } from "@/components/registration/PassengerRegister";
-import { uploadImage } from "@/lib/image";
+import { cleanAccount, formatAccount } from "@/lib/bank";
+import { STATUS_LABELS, isActiveStatus, isBlockedStatus } from "@/lib/categories";
+import { ResubmitDocs, DRIVER_DOCS } from "@/components/ResubmitDocs";
 import QRCode from "qrcode";
+
 
 export const Route = createFileRoute("/driver")({ ssr: false, component: DriverPage });
 
