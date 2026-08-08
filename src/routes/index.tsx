@@ -20,7 +20,7 @@ export const Route = createFileRoute("/")({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { profile, userId, loading } = useSession();
+  const { profile, userId, loading, missingProfile } = useSession();
   const [seeded, setSeeded] = useState(false);
 
   useEffect(() => {
@@ -29,11 +29,17 @@ function LoginPage() {
   }, [seeded]);
 
   useEffect(() => {
-    if (loading || !userId || !profile) return;
+    if (loading || !userId) return;
+    if (missingProfile) {
+      toast.error("Tu usuario no tiene un perfil registrado. Contacta al administrador.");
+      supabase.auth.signOut();
+      return;
+    }
+    if (!profile) return;
     if (profile.role === "admin" || profile.role === "supervisor") navigate({ to: "/admin" });
     else if (profile.role === "driver") navigate({ to: "/driver" });
     else navigate({ to: "/passenger" });
-  }, [loading, userId, profile, navigate]);
+  }, [loading, userId, profile, missingProfile, navigate]);
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-accent/40 px-4 py-10">
