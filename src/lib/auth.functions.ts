@@ -90,3 +90,47 @@ export const grantRole = createServerFn({ method: "POST" })
     await supabaseAdmin.from("profiles").update({ role: data.role }).eq("id", data.userId);
     return { ok: true };
   });
+
+/** Elimina un usuario de autenticación (usado para no dejar huérfanos si falla el perfil). */
+export const deleteAuthUser = createServerFn({ method: "POST" })
+  .inputValidator((d) => z.object({ userId: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.auth.admin.deleteUser(data.userId);
+    return { ok: true };
+  });
+
+const supervisorSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+  first_name: z.string().min(1),
+  paternal_surname: z.string().optional(),
+});
+
+/** Crea una cuenta de supervisor activa (solo desde el panel de administración). */
+export const createSupervisor = createServerFn({ method: "POST" })
+  .inputValidator((d) => supervisorSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: user, error } = await supabaseAdmin.auth.admin.createUser({
+      email: data.email,
+      password: data.password,
+      email_confirm: true,
+    });
+    if (error || !user.user) throw new Error(error?.message ?? "No se pudo crear el usuario");
+    const { error: pErr } = await supabaseAdmin.from("profiles").insert({
+      id: user.user.id,
+      role: "supervisor",
+      status: "active",
+      first_name: data.first_name,
+      paternal_surname: data.paternal_surname ?? null,
+      email: data.email,
+    });
+    if (pErr) {
+      await supabaseAdmin.auth.admin.deleteUser(user.user.id);
+      throw new Error(pErr.message);
+    }
+    await supabaseAdmin.from("user_roles").upsert({ user_id: user.user.id, role: "supervisor" });
+    return { userId: user.user.id };
+  });
+
