@@ -31,17 +31,9 @@ type DriverInfo = {
 
 type MyTx = { id: string; verification_code: string; tickets: number; created_at: string };
 
-const TARIFA_API_LABEL: Record<Category, string> = {
-  general: "General",
-  primaria: "Estudiante",
-  secundaria: "Estudiante",
-  adulto_mayor: "Adulto Mayor",
-  discapacidad: "Adulto Mayor",
-};
-
 function PassengerPage() {
   const { profile, userId, loading, refresh } = useSession();
-  const { precio } = useTarifas();
+  const { precio, nombre, error: tarifasError } = useTarifas();
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
@@ -106,7 +98,7 @@ function PassengerPage() {
       const { error } = await supabase.rpc("topup_wallet", { _amount: amount, _method: "qr" });
       if (error) throw error;
       if (profile?.bank_account) {
-        try { await bankTopUp(toAccountId(profile.bank_account), amount, profile.bank_name); } catch { /* API bancaria offline */ }
+        try { await bankTopUp(cleanAccount(profile.bank_account), amount, profile.bank_name); } catch { /* API bancaria offline */ }
       }
       await refresh();
       playSuccessChime();
@@ -138,10 +130,10 @@ function PassengerPage() {
       if (profile.bank_account && driver.bank_account) {
         try {
           await payFare({
-            cuentaOrigen: toAccountId(profile.bank_account),
-            cuentaDestino: toAccountId(driver.bank_account),
+            cuentaOrigen: cleanAccount(profile.bank_account),
+            cuentaDestino: cleanAccount(driver.bank_account),
             monto: Number(row.total),
-            tarifaTipo: TARIFA_API_LABEL[(row.category as Category) ?? "general"],
+            tarifaTipo: nombre((row.category as Category) ?? "general"),
             cantidadPasajes: tickets,
             latitud: coords.latitud,
             longitud: coords.longitud,
@@ -298,7 +290,7 @@ function PassengerPage() {
                 </Button>
               </div>
               <div className="mt-3 text-sm space-y-1">
-                <div className="flex justify-between"><span>1 {profile.category ? CATEGORY_LABELS[profile.category] : "General"}</span><span>Bs {basePrice.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>1 {nombre(profile.category ?? "general")}</span><span>Bs {basePrice.toFixed(2)}</span></div>
                 {tickets > 1 && <div className="flex justify-between"><span>{tickets - 1} General</span><span>Bs {((tickets - 1) * GENERAL_PRICE).toFixed(2)}</span></div>}
                 <div className="flex justify-between font-bold border-t pt-1"><span>Total</span><span>Bs {total.toFixed(2)}</span></div>
               </div>
