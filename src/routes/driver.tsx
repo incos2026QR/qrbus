@@ -104,15 +104,15 @@ function DriverPage() {
 
   if (loading || !profile) return <div className="p-8">Cargando...</div>;
 
-  if (profile.status !== "active") {
+  if (!isActiveStatus(profile.status)) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <Card className="p-6 max-w-md w-full space-y-3">
-          <h2 className="text-xl font-bold text-center">Cuenta: {STATUS_LABELS[profile.status] ?? profile.status}</h2>
+          <h2 className="text-xl font-bold text-center">Cuenta: {STATUS_LABELS[String(profile.status).toLowerCase()] ?? profile.status}</h2>
           <p className="text-sm text-muted-foreground text-center">Tu cuenta de chofer debe ser aprobada por un supervisor antes de operar.</p>
           {profile.driver_code && <p className="text-sm text-center">Tu código: <strong>{profile.driver_code}</strong></p>}
-          {profile.status === "rejected" && (
-            <ResubmitDocs profile={profile} onDone={refresh} />
+          {isBlockedStatus(profile.status) && (
+            <ResubmitDocs profile={profile} docs={DRIVER_DOCS} onDone={refresh} />
           )}
           <Button className="w-full" variant="outline" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/" }); }}>
             <LogOut className="w-4 h-4 mr-2" /> Cerrar sesión
@@ -125,7 +125,8 @@ function DriverPage() {
   const totalTickets = txs.reduce((s, t) => s + Number(t.tickets ?? 1), 0);
   const totalToday = txs.reduce((s, t) => s + Number(t.amount), 0);
   const balance = Number(profile.balance ?? 0);
-  const account = profile.bank_account ? toAccountId(profile.bank_account) : "";
+  const account = cleanAccount(profile.bank_account ?? "");
+
 
   return (
     <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4 relative">
