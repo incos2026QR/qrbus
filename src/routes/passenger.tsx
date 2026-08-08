@@ -3,9 +3,11 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
-import { CATEGORY_LABELS, STATUS_LABELS, type Category } from "@/lib/categories";
+import { STATUS_LABELS, isActiveStatus, isBlockedStatus, type Category } from "@/lib/categories";
+import { ResubmitDocs, PASSENGER_DOCS } from "@/components/ResubmitDocs";
 import { useTarifas } from "@/lib/tarifas";
-import { toAccountId, getCoords, payFare, topUp as bankTopUp } from "@/lib/bank";
+import { cleanAccount, getCoords, payFare, topUp as bankTopUp } from "@/lib/bank";
+
 import { playSuccessChime } from "@/lib/sound";
 import { QrScanner } from "@/components/QrScanner";
 import { Button } from "@/components/ui/button";
