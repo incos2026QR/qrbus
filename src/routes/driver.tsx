@@ -196,7 +196,7 @@ function DriverPage() {
                   <Select value={wDest || account} onValueChange={setWDest}>
                     <SelectTrigger><SelectValue placeholder="Selecciona tu cuenta" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={account}>{account}</SelectItem>
+                      <SelectItem value={account}>{formatAccount(profile.bank_name, account)}</SelectItem>
                     </SelectContent>
                   </Select>
                 ) : (
