@@ -1,14 +1,17 @@
 export type Category = "general" | "primaria" | "secundaria" | "adulto_mayor" | "discapacidad";
 
-export const CATEGORY_LABELS: Record<Category, string> = {
-  general: "General",
-  primaria: "Escolar",
-  secundaria: "Universitario",
-  adulto_mayor: "Adulto Mayor",
-  discapacidad: "Persona con Discapacidad",
-};
+/**
+ * Categorías admitidas por el enum `fare_category`. Los nombres y precios
+ * visibles provienen siempre de `public.tarifas` (ver `useTarifas`).
+ */
+export const ALL_CATEGORIES: Category[] = [
+  "general",
+  "primaria",
+  "secundaria",
+  "adulto_mayor",
+  "discapacidad",
+];
 
-export const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as Category[];
 
 export function computeAge(birthdate: string): number {
   const b = new Date(birthdate);
