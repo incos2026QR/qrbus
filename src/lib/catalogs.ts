@@ -10,6 +10,14 @@ export type Banco = {
   cuenta_max?: number | null;
 };
 
+/** Acceso sin tipos generados: estas tablas existen en la base de datos del proyecto. */
+type AnyTable = {
+  select: (cols: string) => {
+    order: (col: string) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>;
+  };
+};
+const table = (name: string) => (supabase.from as unknown as (n: string) => AnyTable)(name);
+
 /** Líneas de micro / transporte activas leídas desde `public.lineas_transporte`. */
 export function useLineasTransporte() {
   const [lineas, setLineas] = useState<LineaTransporte[]>([]);
@@ -18,22 +26,15 @@ export function useLineasTransporte() {
 
   useEffect(() => {
     let alive = true;
-    supabase
-      .from("lineas_transporte")
-      .select("id, nombre, activa")
-      .order("nombre")
-      .then(({ data, error }) => {
-        if (!alive) return;
-        if (error) setError(error.message);
-        else {
-          setLineas(
-            (data ?? [])
-              .filter((l: { activa?: boolean | null }) => l.activa !== false)
-              .map((l: { id: string; nombre: string }) => ({ id: String(l.id), nombre: l.nombre })),
-          );
-        }
-        setLoading(false);
-      });
+    table("lineas_transporte").select("id, nombre, activa").order("nombre").then(({ data, error }) => {
+      if (!alive) return;
+      if (error) setError(error.message);
+      else {
+        const rows = (data ?? []) as { id: string; nombre: string; activa?: boolean | null }[];
+        setLineas(rows.filter((l) => l.activa !== false).map((l) => ({ id: String(l.id), nombre: l.nombre })));
+      }
+      setLoading(false);
+    });
     return () => { alive = false; };
   }, []);
 
@@ -48,16 +49,12 @@ export function useBancos() {
 
   useEffect(() => {
     let alive = true;
-    supabase
-      .from("bancos")
-      .select("*")
-      .order("nombre")
-      .then(({ data, error }) => {
-        if (!alive) return;
-        if (error) setError(error.message);
-        else setBancos((data ?? []) as unknown as Banco[]);
-        setLoading(false);
-      });
+    table("bancos").select("*").order("nombre").then(({ data, error }) => {
+      if (!alive) return;
+      if (error) setError(error.message);
+      else setBancos((data ?? []) as Banco[]);
+      setLoading(false);
+    });
     return () => { alive = false; };
   }, []);
 
