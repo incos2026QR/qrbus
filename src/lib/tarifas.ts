@@ -2,55 +2,72 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Category } from "./categories";
 
-export type Tarifa = { tipo: string; nombre: string; precio: number };
+export type Tarifa = { id: string; tipo: string; nombre: string; precio: number };
 
-/** Respaldo usado solo si la base de datos aún no responde. */
-export const TARIFAS_RESPALDO: Record<Category, Tarifa> = {
-  general: { tipo: "general", nombre: "General", precio: 2.0 },
-  primaria: { tipo: "primaria", nombre: "Escolar", precio: 0.8 },
-  secundaria: { tipo: "secundaria", nombre: "Universitario", precio: 1.0 },
-  adulto_mayor: { tipo: "adulto_mayor", nombre: "Adulto Mayor", precio: 1.0 },
-  discapacidad: { tipo: "discapacidad", nombre: "Persona con Discapacidad", precio: 1.0 },
+/**
+ * Equivalencia entre el valor del enum `fare_category` guardado en `profiles`
+ * y el `tipo` de la fila correspondiente en `public.tarifas`.
+ * No define tarifas: solo enlaza cada categoría con su fila en la base de datos.
+ */
+export const CATEGORY_TIPO: Record<Category, string> = {
+  general: "general",
+  primaria: "estudiante",
+  secundaria: "universitario",
+  adulto_mayor: "adulto_mayor",
+  discapacidad: "discapacidad",
 };
+
+export function tipoForCategory(c: Category | string | null | undefined): string {
+  const key = (c ?? "general") as Category;
+  return CATEGORY_TIPO[key] ?? String(c ?? "general");
+}
 
 export type MapaTarifas = Record<string, Tarifa>;
 
-let cache: MapaTarifas | null = null;
-let inflight: Promise<MapaTarifas> | null = null;
+let cache: { list: Tarifa[]; byTipo: MapaTarifas } | null = null;
+let inflight: Promise<{ list: Tarifa[]; byTipo: MapaTarifas }> | null = null;
 
-export async function fetchTarifas(force = false): Promise<MapaTarifas> {
+/** Lee las tarifas vigentes desde `public.tarifas` (única fuente de verdad). */
+export async function fetchTarifas(force = false) {
   if (cache && !force) return cache;
   if (inflight && !force) return inflight;
   inflight = (async () => {
-    const { data } = await supabase.from("tarifas").select("tipo, nombre, precio");
-    const mapa: MapaTarifas = { ...TARIFAS_RESPALDO };
-    for (const t of data ?? []) {
-      mapa[t.tipo] = { tipo: t.tipo, nombre: t.nombre, precio: Number(t.precio) };
-    }
-    cache = mapa;
+    const { data, error } = await supabase.from("tarifas").select("id, tipo, nombre, precio").order("precio");
+    if (error) { inflight = null; throw error; }
+    const list: Tarifa[] = (data ?? []).map((t) => ({
+      id: String(t.id), tipo: t.tipo, nombre: t.nombre, precio: Number(t.precio),
+    }));
+    const byTipo: MapaTarifas = {};
+    for (const t of list) byTipo[t.tipo] = t;
+    cache = { list, byTipo };
     inflight = null;
-    return mapa;
+    return cache;
   })();
   return inflight;
 }
 
 /** Hook con las tarifas vigentes leídas desde la base de datos. */
 export function useTarifas() {
-  const [tarifas, setTarifas] = useState<MapaTarifas>(cache ?? TARIFAS_RESPALDO);
+  const [list, setList] = useState<Tarifa[]>(cache?.list ?? []);
+  const [byTipo, setByTipo] = useState<MapaTarifas>(cache?.byTipo ?? {});
   const [loading, setLoading] = useState(!cache);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     fetchTarifas()
-      .then((m) => { if (alive) { setTarifas(m); setLoading(false); } })
-      .catch(() => { if (alive) setLoading(false); });
+      .then((m) => { if (alive) { setList(m.list); setByTipo(m.byTipo); setLoading(false); } })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setError(e instanceof Error ? e.message : "No se pudieron cargar las tarifas");
+        setLoading(false);
+      });
     return () => { alive = false; };
   }, []);
 
-  const precio = (c: Category | string | null | undefined) =>
-    tarifas[(c ?? "general") as string]?.precio ?? TARIFAS_RESPALDO.general.precio;
-  const nombre = (c: Category | string | null | undefined) =>
-    tarifas[(c ?? "general") as string]?.nombre ?? TARIFAS_RESPALDO.general.nombre;
+  const tarifaFor = (c: Category | string | null | undefined): Tarifa | undefined => byTipo[tipoForCategory(c)];
+  const precio = (c: Category | string | null | undefined): number => Number(tarifaFor(c)?.precio ?? 0);
+  const nombre = (c: Category | string | null | undefined): string => tarifaFor(c)?.nombre ?? String(c ?? "—");
 
-  return { tarifas, precio, nombre, loading };
+  return { tarifas: list, byTipo, tarifaFor, precio, nombre, loading, error };
 }

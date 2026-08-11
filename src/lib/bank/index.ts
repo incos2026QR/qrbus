@@ -28,16 +28,21 @@ export function obtenerAdaptador(banco?: string | null): AdaptadorBancario {
   if (!banco) return POR_DEFECTO;
   const clave = banco.trim().toLowerCase();
   return (
-    ADAPTADORES.find((a) => a.id === clave || a.nombre.toLowerCase() === clave) ?? POR_DEFECTO
+    ADAPTADORES.find((a) => a.id === clave || a.nombre.toLowerCase() === clave) ??
+    new AdaptadorTrufi(clave.replace(/\s+/g, "-"), banco)
   );
 }
 
-/** Construye el identificador de cuenta anteponiendo "CTA-". */
-export function toAccountId(input: string): string {
-  const clean = input.trim().replace(/\s*-\s*/g, "-").replace(/\s+/g, "-").toUpperCase();
-  if (!clean) return "";
-  return clean.startsWith("CTA-") ? clean : `CTA-${clean}`;
+/** Deja el número de cuenta limpio: solo dígitos, sin prefijos. */
+export function cleanAccount(input: string): string {
+  return (input ?? "").replace(/\D+/g, "");
 }
+
+/** Formato de visualización uniforme para cuentas bancarias. */
+export function formatAccount(bankName?: string | null, account?: string | null): string {
+  return `Banco: ${bankName?.trim() || "—"} | Cuenta: ${cleanAccount(account ?? "") || "—"}`;
+}
+
 
 // ---- Fachada: la app llama estas funciones y el adaptador resuelve el banco ----
 

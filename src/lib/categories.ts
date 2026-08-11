@@ -1,14 +1,17 @@
 export type Category = "general" | "primaria" | "secundaria" | "adulto_mayor" | "discapacidad";
 
-export const CATEGORY_LABELS: Record<Category, string> = {
-  general: "General",
-  primaria: "Escolar",
-  secundaria: "Universitario",
-  adulto_mayor: "Adulto Mayor",
-  discapacidad: "Persona con Discapacidad",
-};
+/**
+ * Categorías admitidas por el enum `fare_category`. Los nombres y precios
+ * visibles provienen siempre de `public.tarifas` (ver `useTarifas`).
+ */
+export const ALL_CATEGORIES: Category[] = [
+  "general",
+  "primaria",
+  "secundaria",
+  "adulto_mayor",
+  "discapacidad",
+];
 
-export const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as Category[];
 
 export function computeAge(birthdate: string): number {
   const b = new Date(birthdate);
@@ -75,8 +78,25 @@ export const STATUS_LABELS: Record<string, string> = {
   pending: "Pendiente de aprobación",
   active: "Activo",
   rejected: "Rechazado",
+  rechazado: "Rechazado",
+  rechazada: "Rechazada",
   suspended: "Suspendido",
 };
+
+/**
+ * Estados que bloquean la cuenta y habilitan el reenvío de documentos.
+ * Se comparan sin distinguir mayúsculas/minúsculas.
+ */
+export const BLOCKED_STATUSES = ["rejected", "rechazado", "rechazada", "suspended"];
+
+export function isBlockedStatus(status?: string | null): boolean {
+  return BLOCKED_STATUSES.includes(String(status ?? "").toLowerCase());
+}
+
+export function isActiveStatus(status?: string | null): boolean {
+  return String(status ?? "").toLowerCase() === "active";
+}
+
 
 export const ROLE_LABELS: Record<string, string> = {
   admin: "Administrador",
