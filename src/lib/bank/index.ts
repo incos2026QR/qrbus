@@ -33,9 +33,9 @@ export function obtenerAdaptador(banco?: string | null): AdaptadorBancario {
   );
 }
 
-/** Deja el número de cuenta limpio: solo dígitos, sin prefijos. */
+/** Mantiene el identificador de cuenta tal cual lo maneja el banco */
 export function cleanAccount(input: string): string {
-  return (input ?? "").replace(/\D+/g, "");
+  return (input ?? "").trim();
 }
 
 /** Formato de visualización uniforme para cuentas bancarias. */
