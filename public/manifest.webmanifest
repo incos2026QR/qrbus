@@ -1,0 +1,24 @@
+{
+  "name": "QR Pago Justo",
+  "short_name": "Pago Justo",
+  "description": "Gestión de tarifas de transporte público con validación QR en Bolivia.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1f4fa3",
+  "theme_color": "#1f4fa3",
+  "icons": [
+    {
+      "src": "/icons/pasaje_qr_192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pasaje_qr_512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
