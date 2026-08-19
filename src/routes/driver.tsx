@@ -24,15 +24,19 @@ import {
 import { toast } from "sonner";
 import {
   LogOut,
-  Circle,
-  Flag,
   Wallet,
   Loader2,
   BadgeCheck,
   Banknote,
   Bluetooth,
   BluetoothConnected,
+  QrCode,
+  Download,
+  Eye,
+  EyeOff,
+  Flag,
 } from "lucide-react";
+
 import { isBluetoothSupported, linkHardware, sendPaymentOk } from "@/lib/bluetooth";
 import { cleanAccount, formatAccount } from "@/lib/bank";
 import { STATUS_LABELS, isActiveStatus, isBlockedStatus } from "@/lib/categories";
