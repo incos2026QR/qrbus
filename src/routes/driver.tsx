@@ -24,15 +24,19 @@ import {
 import { toast } from "sonner";
 import {
   LogOut,
-  Circle,
-  Flag,
   Wallet,
   Loader2,
   BadgeCheck,
   Banknote,
   Bluetooth,
   BluetoothConnected,
+  QrCode,
+  Download,
+  Eye,
+  EyeOff,
+  Flag,
 } from "lucide-react";
+
 import { isBluetoothSupported, linkHardware, sendPaymentOk } from "@/lib/bluetooth";
 import { cleanAccount, formatAccount } from "@/lib/bank";
 import { STATUS_LABELS, isActiveStatus, isBlockedStatus } from "@/lib/categories";
@@ -70,6 +74,18 @@ function DriverPage() {
   // Bluetooth hardware link
   const [btName, setBtName] = useState<string | null>(null);
   const [btBusy, setBtBusy] = useState(false);
+  const [btOpen, setBtOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [hideMoney, setHideMoney] = useState(false);
+
+  function downloadQr() {
+    if (!codeQr) return;
+    const a = document.createElement("a");
+    a.href = codeQr;
+    a.download = `${profile?.driver_code ?? "chofer"}-qr.png`;
+    a.click();
+  }
+
 
   async function linkBluetooth() {
     if (!isBluetoothSupported()) return toast.error("Este navegador no soporta Web Bluetooth");
@@ -206,6 +222,8 @@ function DriverPage() {
   const totalToday = txs.reduce((s, t) => s + Number(t.amount), 0);
   const balance = Number(profile.balance ?? 0);
   const account = cleanAccount(profile.bank_account ?? "");
+  const money = (n: number) => (hideMoney ? "••••••" : `Bs ${n.toFixed(2)}`);
+
 
   return (
     <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4 relative">
@@ -228,69 +246,139 @@ function DriverPage() {
         </div>
       )}
 
-      <header className="flex items-center justify-between py-2">
-        <div>
+      <header className="flex items-center justify-between gap-2 py-2 sticky top-0 z-30 bg-background/90 backdrop-blur border-b">
+        <div className="min-w-0">
           <p className="text-xs uppercase text-muted-foreground">Chofer</p>
-          <h1 className="font-bold">
+          <h1 className="font-bold truncate">
             {profile.first_name} {profile.paternal_surname}
           </h1>
         </div>
-        <div className="flex gap-1">
-          <Button size="sm" variant="ghost" asChild>
+        <div className="flex items-center gap-1">
+          {/* Bluetooth */}
+          <Dialog open={btOpen} onOpenChange={setBtOpen}>
+            <DialogTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label="Enlazar tablero de hardware"
+                title={btName ? `Hardware enlazado: ${btName}` : "Enlazar hardware"}
+              >
+                {btName ? (
+                  <BluetoothConnected className="w-5 h-5 text-success" />
+                ) : (
+                  <Bluetooth className="w-5 h-5" />
+                )}
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-full sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Tablero de Hardware</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Estado:{" "}
+                  <span className={btName ? "text-success font-medium" : "font-medium"}>
+                    {btName ? `Conectado (${btName})` : "Desconectado"}
+                  </span>
+                </p>
+                <Button className="w-full" onClick={linkBluetooth} disabled={btBusy}>
+                  {btBusy ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Bluetooth className="w-4 h-4 mr-2" />
+                  )}
+                  {btName ? "Reconectar" : "Enlazar Tablero de Hardware"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Driver QR */}
+          <Dialog open={qrOpen} onOpenChange={setQrOpen}>
+            <DialogTrigger asChild>
+              <Button size="icon" variant="ghost" aria-label="Ver mi código QR">
+                <QrCode className="w-5 h-5" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-full sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Mi código de chofer</DialogTitle>
+              </DialogHeader>
+              <div className="text-center space-y-3">
+                <div className="text-5xl font-black text-primary tracking-widest">
+                  {profile.driver_code}
+                </div>
+                {codeQr && (
+                  <div className="bg-white p-3 rounded-lg inline-block border">
+                    <img
+                      src={codeQr}
+                      alt={`QR del chofer ${profile.driver_code}`}
+                      className="w-56 h-56"
+                    />
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Los pasajeros escanean este QR (o tipean el código) para pagar
+                </p>
+                <Button className="w-full" onClick={downloadQr} disabled={!codeQr}>
+                  <Download className="w-4 h-4 mr-2" /> Descargar QR
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Button size="icon" variant="ghost" asChild aria-label="Reportes">
             <Link to="/reportes">
-              <Flag className="w-4 h-4" />
+              <Flag className="w-5 h-5" />
             </Link>
           </Button>
+
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
+            aria-label="Cerrar sesión"
             onClick={async () => {
               await supabase.auth.signOut();
               navigate({ to: "/" });
             }}
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-5 h-5" />
           </Button>
         </div>
       </header>
 
-      <Card className="p-6 text-center bg-gradient-to-br from-primary/10 to-accent">
-        <p className="text-xs uppercase text-muted-foreground tracking-widest">Tu código</p>
-        <div className="text-5xl font-black text-primary my-2 tracking-widest">
-          {profile.driver_code}
-        </div>
-        {codeQr && (
-          <div className="bg-white p-3 rounded-lg inline-block border">
-            <img src={codeQr} alt={`QR del chofer ${profile.driver_code}`} className="w-40 h-40" />
+      {/* Metrics */}
+      <Card className="p-5 space-y-4">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Total Hoy</p>
+            <div className="text-4xl font-black">{money(totalToday)}</div>
           </div>
-        )}
-        <p className="text-xs text-muted-foreground mt-2">
-          Los pasajeros escanean este QR (o tipean el código) para pagar
-        </p>
-      </Card>
-
-      <Button
-        variant={btName ? "secondary" : "outline"}
-        className="w-full"
-        onClick={linkBluetooth}
-        disabled={btBusy}
-      >
-        {btBusy ? (
-          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-        ) : btName ? (
-          <BluetoothConnected className="w-4 h-4 mr-2 text-success" />
-        ) : (
-          <Bluetooth className="w-4 h-4 mr-2" />
-        )}
-        {btName ? `Hardware enlazado: ${btName}` : "Enlazar Tablero de Hardware (Bluetooth)"}
-      </Button>
-
-      {/* Earnings wallet */}
-      <Card className="p-5">
-        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-          <Wallet className="w-4 h-4" /> Saldo Acumulado
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={hideMoney ? "Mostrar montos" : "Ocultar montos"}
+            onClick={() => setHideMoney((v) => !v)}
+          >
+            {hideMoney ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+          </Button>
         </div>
-        <div className="text-4xl font-black my-2">Bs {balance.toFixed(2)}</div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-lg border p-3">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+              <Wallet className="w-4 h-4" /> Saldo Acumulado
+            </div>
+            <div className="text-2xl font-bold mt-1">{money(balance)}</div>
+          </div>
+          <div className="rounded-lg border p-3">
+            <div className="text-xs uppercase tracking-widest text-muted-foreground">
+              Pasajes Hoy
+            </div>
+            <div className="text-2xl font-bold mt-1">{totalTickets}</div>
+          </div>
+        </div>
+
         <Dialog
           open={wOpen}
           onOpenChange={(o) => {
@@ -299,8 +387,8 @@ function DriverPage() {
           }}
         >
           <DialogTrigger asChild>
-            <Button className="w-full" variant="secondary">
-              <Banknote className="w-4 h-4 mr-2" /> Retirar Ganancias
+            <Button className="w-full" variant="secondary" disabled={balance <= 0}>
+              <Banknote className="w-4 h-4 mr-2" /> Retirar
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-full sm:max-w-sm">
@@ -355,42 +443,6 @@ function DriverPage() {
         </Dialog>
       </Card>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Card className="p-4 text-center">
-          <div className="text-xs text-muted-foreground">Pasajes hoy</div>
-          <div className="text-3xl font-bold">{totalTickets}</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-xs text-muted-foreground">Total hoy</div>
-          <div className="text-3xl font-bold">Bs {totalToday.toFixed(2)}</div>
-        </Card>
-      </div>
-
-      {/* OLED Hardware simulator — no fare or category shown */}
-      <div>
-        <p className="text-xs text-muted-foreground mb-2 text-center">
-          Pantalla del hardware (OLED 0.96")
-        </p>
-        <div className="oled-screen p-6 mx-auto max-w-xs aspect-[4/3] flex flex-col items-center justify-center">
-          <div className="flex items-center gap-2 mb-3">
-            <Circle
-              className={`w-3 h-3 ${flash ? "fill-success text-success animate-pulse" : "fill-current opacity-30"}`}
-            />
-            <span className="text-xs opacity-80">{flash ? "PAGO OK" : "LISTO"}</span>
-          </div>
-          {lastCode ? (
-            <>
-              <div className="text-xs opacity-70">CÓDIGO</div>
-              <div className="text-4xl font-bold tracking-widest tabular-nums">{lastCode}</div>
-              <div className="mt-2 text-lg">
-                {lastTickets} Pasaje{lastTickets > 1 ? "s" : ""}
-              </div>
-            </>
-          ) : (
-            <div className="text-sm opacity-70">Esperando pago...</div>
-          )}
-        </div>
-      </div>
 
       <Card className="p-4">
         <h3 className="font-semibold mb-2">Últimas validaciones</h3>
