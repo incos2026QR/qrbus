@@ -222,6 +222,8 @@ function DriverPage() {
   const totalToday = txs.reduce((s, t) => s + Number(t.amount), 0);
   const balance = Number(profile.balance ?? 0);
   const account = cleanAccount(profile.bank_account ?? "");
+  const money = (n: number) => (hideMoney ? "••••••" : `Bs ${n.toFixed(2)}`);
+
 
   return (
     <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4 relative">
