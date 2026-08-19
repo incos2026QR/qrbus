@@ -74,6 +74,18 @@ function DriverPage() {
   // Bluetooth hardware link
   const [btName, setBtName] = useState<string | null>(null);
   const [btBusy, setBtBusy] = useState(false);
+  const [btOpen, setBtOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [hideMoney, setHideMoney] = useState(false);
+
+  function downloadQr() {
+    if (!codeQr) return;
+    const a = document.createElement("a");
+    a.href = codeQr;
+    a.download = `${profile?.driver_code ?? "chofer"}-qr.png`;
+    a.click();
+  }
+
 
   async function linkBluetooth() {
     if (!isBluetoothSupported()) return toast.error("Este navegador no soporta Web Bluetooth");
