@@ -80,11 +80,35 @@ function DriverPage() {
 
   function downloadQr() {
     if (!codeQr) return;
-    const a = document.createElement("a");
-    a.href = codeQr;
-    a.download = `${profile?.driver_code ?? "chofer"}-qr.png`;
-    a.click();
+    const code = profile?.driver_code ?? "";
+    const img = new Image();
+    img.onload = () => {
+      const W = 640;
+      const H = 820;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#0b1b3a";
+      ctx.textAlign = "center";
+      ctx.font = "900 96px system-ui, sans-serif";
+      ctx.fillText(code, W / 2, 150);
+      const size = 460;
+      ctx.drawImage(img, (W - size) / 2, 210, size, size);
+      ctx.fillStyle = "#333333";
+      ctx.font = "32px system-ui, sans-serif";
+      ctx.fillText("Escanea el QR o ingresa el código", W / 2, 750);
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = `${code || "chofer"}-qr.png`;
+      a.click();
+    };
+    img.src = codeQr;
   }
+
 
 
   async function linkBluetooth() {
