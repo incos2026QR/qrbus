@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History } from "lucide-react";
+import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History, Eye, EyeOff } from "lucide-react";
 import QRCode from "qrcode";
 
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
