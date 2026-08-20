@@ -80,11 +80,35 @@ function DriverPage() {
 
   function downloadQr() {
     if (!codeQr) return;
-    const a = document.createElement("a");
-    a.href = codeQr;
-    a.download = `${profile?.driver_code ?? "chofer"}-qr.png`;
-    a.click();
+    const code = profile?.driver_code ?? "";
+    const img = new Image();
+    img.onload = () => {
+      const W = 640;
+      const H = 820;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#0b1b3a";
+      ctx.textAlign = "center";
+      ctx.font = "900 96px system-ui, sans-serif";
+      ctx.fillText(code, W / 2, 150);
+      const size = 460;
+      ctx.drawImage(img, (W - size) / 2, 210, size, size);
+      ctx.fillStyle = "#333333";
+      ctx.font = "32px system-ui, sans-serif";
+      ctx.fillText("Escanea el QR o ingresa el código", W / 2, 750);
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = `${code || "chofer"}-qr.png`;
+      a.click();
+    };
+    img.src = codeQr;
   }
+
 
 
   async function linkBluetooth() {
@@ -327,6 +351,78 @@ function DriverPage() {
             </DialogContent>
           </Dialog>
 
+          {/* Retirar ganancias */}
+          <Dialog
+            open={wOpen}
+            onOpenChange={(o) => {
+              setWOpen(o);
+              if (o && account) setWDest(account);
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label="Retirar ganancias"
+                title="Retirar ganancias"
+                disabled={balance <= 0}
+              >
+                <Banknote className="w-5 h-5" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-full sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Retirar ganancias</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div>
+                  <Label>Monto (Bs)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    step="0.5"
+                    value={wAmount}
+                    onChange={(e) => setWAmount(e.target.value)}
+                    placeholder={balance.toFixed(2)}
+                  />
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="px-0"
+                    onClick={() => setWAmount(balance.toFixed(2))}
+                  >
+                    Retirar todo
+                  </Button>
+                </div>
+                <div>
+                  <Label>Cuenta bancaria registrada</Label>
+                  {account ? (
+                    <Select value={wDest || account} onValueChange={setWDest}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona tu cuenta" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={account}>
+                          {formatAccount(profile.bank_name, account)}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-destructive">
+                      No tienes una cuenta bancaria registrada.
+                    </p>
+                  )}
+                </div>
+                <Button className="w-full" onClick={doWithdraw} disabled={wBusy || !account}>
+                  {wBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Confirmar retiro
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+
+
           <Button size="icon" variant="ghost" asChild aria-label="Reportes">
             <Link to="/reportes">
               <Flag className="w-5 h-5" />
@@ -378,70 +474,8 @@ function DriverPage() {
             <div className="text-2xl font-bold mt-1">{totalTickets}</div>
           </div>
         </div>
-
-        <Dialog
-          open={wOpen}
-          onOpenChange={(o) => {
-            setWOpen(o);
-            if (o && account) setWDest(account);
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button className="w-full" variant="secondary" disabled={balance <= 0}>
-              <Banknote className="w-4 h-4 mr-2" /> Retirar
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-full sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Retirar ganancias</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div>
-                <Label>Monto (Bs)</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  step="0.5"
-                  value={wAmount}
-                  onChange={(e) => setWAmount(e.target.value)}
-                  placeholder={balance.toFixed(2)}
-                />
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className="px-0"
-                  onClick={() => setWAmount(balance.toFixed(2))}
-                >
-                  Retirar todo
-                </Button>
-              </div>
-              <div>
-                <Label>Cuenta bancaria registrada</Label>
-                {account ? (
-                  <Select value={wDest || account} onValueChange={setWDest}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona tu cuenta" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={account}>
-                        {formatAccount(profile.bank_name, account)}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <p className="text-sm text-destructive">
-                    No tienes una cuenta bancaria registrada.
-                  </p>
-                )}
-              </div>
-              <Button className="w-full" onClick={doWithdraw} disabled={wBusy || !account}>
-                {wBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Confirmar retiro
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </Card>
+
 
 
       <Card className="p-4">

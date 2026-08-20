@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History } from "lucide-react";
+import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History, Eye, EyeOff } from "lucide-react";
 import QRCode from "qrcode";
 
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
@@ -42,6 +42,8 @@ function PassengerPage() {
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<{ vcode: string; selfieUrl: string | null; tickets: number } | null>(null);
   const [history, setHistory] = useState<MyTx[]>([]);
+  const [hideBalance, setHideBalance] = useState(false);
+
 
   // Top-up modal
   const [topupOpen, setTopupOpen] = useState(false);
@@ -216,43 +218,8 @@ function PassengerPage() {
         </div>
       </header>
 
-      {/* Virtual wallet */}
-      <Card className="p-5 bg-gradient-to-br from-primary/15 to-accent">
-        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-          <Wallet className="w-4 h-4" /> Saldo Pago Justo
-        </div>
-        <div className="text-4xl font-black my-2">Bs {balance.toFixed(2)}</div>
-        <Dialog open={topupOpen} onOpenChange={setTopupOpen}>
-          <DialogTrigger asChild>
-            <Button className="w-full"><Plus className="w-4 h-4 mr-2" /> Cargar Saldo</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-full sm:max-w-sm">
-            <DialogHeader><DialogTitle>Cargar saldo</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div>
-                <Label>Monto (Bs)</Label>
-                <Input type="number" min={1} step="0.5" value={topupAmount} onChange={(e) => setTopupAmount(e.target.value)} />
-              </div>
-              <div className="flex gap-2">
-                {[10, 20, 50].map((v) => (
-                  <Button key={v} type="button" size="sm" variant="outline" className="flex-1" onClick={() => setTopupAmount(String(v))}>
-                    Bs {v}
-                  </Button>
-                ))}
-              </div>
-              <div className="bg-white rounded-lg border p-3 text-center">
-                {topupQr ? <img src={topupQr} alt="QR de recarga" className="mx-auto w-44 h-44" /> : <QrCode className="w-24 h-24 mx-auto text-muted-foreground" />}
-                <p className="text-xs text-muted-foreground mt-2">Escanea con Yape / Tigo Money / Banca Móvil</p>
-              </div>
-              <Button className="w-full" onClick={doTopup} disabled={topupBusy}>
-                {topupBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Simular pago y acreditar
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </Card>
-
-      <Card className="p-5 space-y-4 mt-4">
+      {/* 1. Scanner / código manual */}
+      <Card className="p-5 space-y-4">
         {!driver && (
           <>
             {scanning ? (
@@ -315,6 +282,54 @@ function PassengerPage() {
           </div>
         )}
       </Card>
+
+      {/* 2. Billetera virtual */}
+      <Card className="p-5 mt-4 bg-gradient-to-br from-primary/15 to-accent">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+            <Wallet className="w-4 h-4" /> Saldo Pago Justo
+          </div>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            aria-label={hideBalance ? "Mostrar saldo" : "Ocultar saldo"}
+            onClick={() => setHideBalance((v) => !v)}
+          >
+            {hideBalance ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </Button>
+        </div>
+        <div className="text-4xl font-black my-2">{hideBalance ? "••••••" : `Bs ${balance.toFixed(2)}`}</div>
+        <Dialog open={topupOpen} onOpenChange={setTopupOpen}>
+          <DialogTrigger asChild>
+            <Button className="w-full"><Plus className="w-4 h-4 mr-2" /> Cargar Saldo</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-full sm:max-w-sm">
+            <DialogHeader><DialogTitle>Cargar saldo</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label>Monto (Bs)</Label>
+                <Input type="number" min={1} step="0.5" value={topupAmount} onChange={(e) => setTopupAmount(e.target.value)} />
+              </div>
+              <div className="flex gap-2">
+                {[10, 20, 50].map((v) => (
+                  <Button key={v} type="button" size="sm" variant="outline" className="flex-1" onClick={() => setTopupAmount(String(v))}>
+                    Bs {v}
+                  </Button>
+                ))}
+              </div>
+              <div className="bg-white rounded-lg border p-3 text-center">
+                {topupQr ? <img src={topupQr} alt="QR de recarga" className="mx-auto w-44 h-44" /> : <QrCode className="w-24 h-24 mx-auto text-muted-foreground" />}
+                <p className="text-xs text-muted-foreground mt-2">Escanea con Yape / Tigo Money / Banca Móvil</p>
+              </div>
+              <Button className="w-full" onClick={doTopup} disabled={topupBusy}>
+                {topupBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Simular pago y acreditar
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </Card>
+
 
       <Card className="p-4 mt-4">
         <h3 className="font-semibold mb-2 flex items-center gap-2 text-sm">
