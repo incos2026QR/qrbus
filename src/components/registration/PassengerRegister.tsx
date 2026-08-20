@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Loader2, Sparkles, Upload, Check } from "lucide-react";
-import { signUpAutoConfirm } from "@/lib/auth.functions";
+import { uploadImage, makeSampleImage } from "@/lib/image";
 import { uploadImage, makeSampleImage } from "@/lib/image";
 import { cleanAccount, formatAccount, createAccount } from "@/lib/bank";
 import { useBancos } from "@/lib/catalogs";
