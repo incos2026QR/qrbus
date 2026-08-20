@@ -402,70 +402,8 @@ function DriverPage() {
             <div className="text-2xl font-bold mt-1">{totalTickets}</div>
           </div>
         </div>
-
-        <Dialog
-          open={wOpen}
-          onOpenChange={(o) => {
-            setWOpen(o);
-            if (o && account) setWDest(account);
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button className="w-full" variant="secondary" disabled={balance <= 0}>
-              <Banknote className="w-4 h-4 mr-2" /> Retirar
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-full sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Retirar ganancias</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div>
-                <Label>Monto (Bs)</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  step="0.5"
-                  value={wAmount}
-                  onChange={(e) => setWAmount(e.target.value)}
-                  placeholder={balance.toFixed(2)}
-                />
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className="px-0"
-                  onClick={() => setWAmount(balance.toFixed(2))}
-                >
-                  Retirar todo
-                </Button>
-              </div>
-              <div>
-                <Label>Cuenta bancaria registrada</Label>
-                {account ? (
-                  <Select value={wDest || account} onValueChange={setWDest}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona tu cuenta" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={account}>
-                        {formatAccount(profile.bank_name, account)}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <p className="text-sm text-destructive">
-                    No tienes una cuenta bancaria registrada.
-                  </p>
-                )}
-              </div>
-              <Button className="w-full" onClick={doWithdraw} disabled={wBusy || !account}>
-                {wBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Confirmar retiro
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </Card>
+
 
 
       <Card className="p-4">
