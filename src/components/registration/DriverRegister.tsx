@@ -78,13 +78,32 @@ export function DriverRegister() {
     if (cuentaErr) return toast.error(cuentaErr);
     if (!captchaOk) return toast.error("Completa la verificación humana");
     setBusy(true);
-    let createdUserId: string | null = null;
     try {
       const email = s.email || `${s.phone}@pagojusto.bo`;
-      const { userId } = await signUpAutoConfirm({ data: { email, password: s.password, phone: s.phone } });
-      createdUserId = userId;
-      const { error } = await supabase.auth.signInWithPassword({ email, password: s.password });
-      if (error) throw error;
+
+      // 1) Crear el usuario de autenticación
+      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+        email,
+        password: s.password,
+        options: { emailRedirectTo: window.location.origin, data: { phone: s.phone } },
+      });
+      if (signUpErr) {
+        throw new Error(
+          /already/i.test(signUpErr.message)
+            ? "Ese correo o teléfono ya está registrado. Inicia sesión."
+            : signUpErr.message,
+        );
+      }
+
+      // 2) Asegurar sesión activa para subir documentos e insertar el perfil
+      let userId = signUpData.user?.id ?? null;
+      if (!signUpData.session) {
+        const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password: s.password });
+        if (error) throw new Error(`Cuenta creada, pero no se pudo iniciar sesión: ${error.message}`);
+        userId = signInData.user?.id ?? userId;
+      }
+      if (!userId) throw new Error("No se pudo obtener el usuario creado");
+
       const { code } = await generateDriverCode();
 
       const up = async (bucket: string, name: string, blob: Blob) =>
@@ -97,15 +116,15 @@ export function DriverRegister() {
       urls.license_url = await up("kyc-documents", "license", s.files.license!);
       urls.union_doc_url = await up("kyc-documents", "union_doc", s.files.union_doc!);
 
-      const { error: pErr } = await supabase.from("profiles").insert({
+      // 3) Insertar el perfil completo (ya no hay trigger que lo cree)
+      const { error: pErr } = await supabase.from("profiles").upsert({
         id: userId, role: "driver", status: "pending",
         first_name: s.first_name, paternal_surname: s.paternal_surname, maternal_surname: s.maternal_surname,
         ci_number: s.ci_number, birthdate: s.birthdate, phone: s.phone, email,
         bank_account: cuenta, bank_name: s.bank_name, transport_line: s.transport_line,
         driver_code: code, ...urls,
-      });
+      }, { onConflict: "id" });
       if (pErr) throw new Error(`No se pudo crear el perfil del chofer: ${pErr.message}`);
-      createdUserId = null; // perfil creado: ya no hay usuario huérfano
       const { error: rErr } = await supabase.from("user_roles").insert({ user_id: userId, role: "driver" });
       if (rErr) toast.warning(`Perfil creado, pero el rol no se registró: ${rErr.message}`);
 
@@ -117,14 +136,10 @@ export function DriverRegister() {
 
       toast.success(`Registrado. Código de chofer: ${code} · ${formatAccount(s.bank_name, cuenta)}. Pendiente de aprobación.`);
     } catch (e) {
-      if (createdUserId) {
-        // Evita usuarios de autenticación huérfanos si falla la creación del perfil.
-        await supabase.auth.signOut().catch(() => {});
-        await deleteAuthUser({ data: { userId: createdUserId } }).catch(() => {});
-      }
-      toast.error(e instanceof Error ? e.message : "Error");
+      toast.error(e instanceof Error ? e.message : "Error de red o registro. Intenta nuevamente.");
     } finally { setBusy(false); }
   }
+
 
   return (
     <form onSubmit={submit} className="space-y-3">

@@ -7,8 +7,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Loader2, Sparkles, Upload, Check } from "lucide-react";
-import { signUpAutoConfirm } from "@/lib/auth.functions";
 import { uploadImage, makeSampleImage } from "@/lib/image";
+
 import { cleanAccount, formatAccount, createAccount } from "@/lib/bank";
 import { useBancos } from "@/lib/catalogs";
 import { useTarifas } from "@/lib/tarifas";
@@ -121,9 +121,28 @@ export function PassengerRegister() {
     setBusy(true);
     try {
       const email = s.email || `${s.phone}@pagojusto.bo`;
-      const { userId } = await signUpAutoConfirm({ data: { email, password: s.password, phone: s.phone } });
-      const { error: signIn } = await supabase.auth.signInWithPassword({ email, password: s.password });
-      if (signIn) throw signIn;
+
+      // 1) Crear el usuario de autenticación
+      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+        email,
+        password: s.password,
+        options: { emailRedirectTo: window.location.origin, data: { phone: s.phone } },
+      });
+      if (signUpErr) {
+        const msg = /already/i.test(signUpErr.message)
+          ? "Ese correo o teléfono ya está registrado. Inicia sesión."
+          : signUpErr.message;
+        throw new Error(msg);
+      }
+
+      // 2) Asegurar sesión activa (necesaria para subir documentos e insertar el perfil)
+      let userId = signUpData.user?.id ?? null;
+      if (!signUpData.session) {
+        const { data: signInData, error: signIn } = await supabase.auth.signInWithPassword({ email, password: s.password });
+        if (signIn) throw new Error(`Cuenta creada, pero no se pudo iniciar sesión: ${signIn.message}`);
+        userId = signInData.user?.id ?? userId;
+      }
+      if (!userId) throw new Error("No se pudo obtener el usuario creado");
 
       const uploads: Record<string, string | null> = {};
       uploads.ci_front_url = await uploadImage(supabase, "kyc-documents", `${userId}/ci_front.jpg`, s.files.ci_front!);
@@ -135,7 +154,8 @@ export function PassengerRegister() {
         uploads.extra_doc_url = await uploadImage(supabase, "kyc-documents", `${userId}/extra.jpg`, extra);
       }
 
-      const { error: profErr } = await supabase.from("profiles").insert({
+      // 3) Insertar el perfil completo (ya no hay trigger que lo cree)
+      const { error: profErr } = await supabase.from("profiles").upsert({
         id: userId,
         role: "passenger",
         status: "pending",
@@ -150,9 +170,10 @@ export function PassengerRegister() {
         bank_account: cuenta,
         bank_name: s.bank_name,
         ...uploads,
-      });
+      }, { onConflict: "id" });
       if (profErr) throw new Error(`No se pudo crear el perfil: ${profErr.message}`);
       await supabase.from("user_roles").insert({ user_id: userId, role: "passenger" });
+
       try {
         await createAccount(cuenta, `${s.first_name} ${s.paternal_surname}`.trim(), s.bank_name);
       } catch {
