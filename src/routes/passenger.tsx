@@ -42,6 +42,8 @@ function PassengerPage() {
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<{ vcode: string; selfieUrl: string | null; tickets: number } | null>(null);
   const [history, setHistory] = useState<MyTx[]>([]);
+  const [hideBalance, setHideBalance] = useState(false);
+
 
   // Top-up modal
   const [topupOpen, setTopupOpen] = useState(false);
