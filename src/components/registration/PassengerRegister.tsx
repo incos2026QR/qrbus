@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Loader2, Sparkles, Upload, Check } from "lucide-react";
 import { uploadImage, makeSampleImage } from "@/lib/image";
-import { uploadImage, makeSampleImage } from "@/lib/image";
+
 import { cleanAccount, formatAccount, createAccount } from "@/lib/bank";
 import { useBancos } from "@/lib/catalogs";
 import { useTarifas } from "@/lib/tarifas";
