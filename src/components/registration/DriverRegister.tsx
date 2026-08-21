@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Loader2, Sparkles } from "lucide-react";
-import { signUpAutoConfirm, generateDriverCode, deleteAuthUser } from "@/lib/auth.functions";
+import { generateDriverCode } from "@/lib/auth.functions";
 import { uploadImage, makeSampleImage } from "@/lib/image";
 import { cleanAccount, formatAccount, createAccount } from "@/lib/bank";
 import { useBancos, useLineasTransporte } from "@/lib/catalogs";
