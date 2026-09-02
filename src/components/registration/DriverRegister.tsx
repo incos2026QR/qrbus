@@ -85,7 +85,10 @@ export function DriverRegister() {
       const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
         email,
         password: s.password,
-        options: { emailRedirectTo: window.location.origin, data: { phone: s.phone } },
+        options: {
+          emailRedirectTo: window.location.origin,
+          data: { phone: s.phone, role: "driver", first_name: s.first_name, paternal_surname: s.paternal_surname },
+        },
       });
       if (signUpErr) {
         throw new Error(
