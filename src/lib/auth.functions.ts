@@ -29,10 +29,19 @@ export const seedAccounts = createServerFn({ method: "POST" }).handler(async () 
     { email: "supervisor1@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Uno" },
     { email: "supervisor2@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Dos" },
     { email: "supervisor3@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Tres" },
+    {
+      email: "choferapi@pagojusto.bo", password: "Password123!", role: "driver", first: "Chofer", surname: "API",
+      extra: { driver_code: "DRV93", phone: "70000093", bank_name: "Banco Unión", bank_account: "104593", transport_line: "Línea 1" },
+    },
+    {
+      email: "pasajeroapi@pagojusto.bo", password: "Password123!", role: "passenger", first: "Pasajero", surname: "API",
+      extra: { category: "general" as const, phone: "70000094", bank_name: "Banco Unión", bank_account: "104594", balance: 50 },
+    },
   ] as const;
 
   const results: { email: string; created: boolean; updated: boolean }[] = [];
   for (const acc of accounts) {
+    const extra = "extra" in acc ? acc.extra : {};
     const { data: existing } = await supabaseAdmin
       .from("profiles")
       .select("id")
@@ -56,19 +65,24 @@ export const seedAccounts = createServerFn({ method: "POST" }).handler(async () 
       results.push({ email: acc.email, created: false, updated: false });
       continue;
     }
-    await supabaseAdmin.from("profiles").insert({
+    await supabaseAdmin.from("profiles").upsert({
       id: user.user.id,
-      role: acc.role as "admin" | "supervisor",
+      role: acc.role as "admin" | "supervisor" | "driver" | "passenger",
       status: "active",
       first_name: acc.first,
       paternal_surname: acc.surname,
       email: acc.email,
-    });
-    await supabaseAdmin.from("user_roles").insert({ user_id: user.user.id, role: acc.role as "admin" | "supervisor" });
+      ...extra,
+    }, { onConflict: "id" });
+    await supabaseAdmin.from("user_roles").upsert(
+      { user_id: user.user.id, role: acc.role as "admin" | "supervisor" | "driver" | "passenger" },
+      { onConflict: "user_id,role" },
+    );
     results.push({ email: acc.email, created: true, updated: false });
   }
   return { results };
 });
+
 
 export const generateDriverCode = createServerFn({ method: "POST" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
