@@ -29,20 +29,22 @@ type DriverInfo = {
   bank_account: string | null;
 };
 
-type MyTx = { id: string; verification_code: string; tickets: number; created_at: string };
+type MyTx = { id: string; verification_code: string; tickets: number; created_at: string; amount: number };
 
 function PassengerPage() {
   const { profile, userId, loading, refresh } = useSession();
-  const { precio, nombre, error: tarifasError } = useTarifas();
+  const { tarifas, precio, nombre, error: tarifasError } = useTarifas();
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
-  const [tickets, setTickets] = useState(1);
-  const [scanning, setScanning] = useState(false);
+  const [companions, setCompanions] = useState<Category[]>([]);
+  const [scanning, setScanning] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<{ vcode: string; selfieUrl: string | null; tickets: number } | null>(null);
   const [history, setHistory] = useState<MyTx[]>([]);
-  const [hideBalance, setHideBalance] = useState(false);
+  const [hideBalance, setHideBalance] = useState(true);
+  const [hideAmounts, setHideAmounts] = useState(true);
+
 
 
   // Top-up modal
@@ -68,7 +70,7 @@ function PassengerPage() {
     if (!userId) return;
     const { data } = await supabase
       .from("transactions")
-      .select("id, verification_code, tickets, created_at")
+      .select("id, verification_code, tickets, created_at, amount")
       .eq("passenger_id", userId)
       .order("created_at", { ascending: false })
       .limit(15);
@@ -77,9 +79,9 @@ function PassengerPage() {
   useEffect(() => { loadHistory(); }, [userId]);
 
   const balance = Number(profile?.balance ?? 0);
-  const GENERAL_PRICE = precio("general");
   const basePrice = precio(profile?.category ?? "general");
-  const total = basePrice + (tickets - 1) * GENERAL_PRICE;
+  const total = basePrice + companions.reduce((s, c) => s + precio(c), 0);
+  const tickets = 1 + companions.length;
 
   async function findDriver(rawCode: string) {
     const clean = rawCode.trim().toUpperCase().replace(/^.*[/:]/, "");
@@ -88,9 +90,10 @@ function PassengerPage() {
     const row = Array.isArray(data) ? (data[0] as DriverInfo | undefined) : (data as DriverInfo | null);
     if (error || !row) return toast.error("Chofer no encontrado o no activo");
     setCode(clean);
-    setTickets(1);
+    setCompanions([]);
     setDriver(row);
   }
+
 
   async function doTopup() {
     const amount = Number(topupAmount);
