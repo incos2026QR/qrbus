@@ -76,7 +76,10 @@ function DriverPage() {
   const [btBusy, setBtBusy] = useState(false);
   const [btOpen, setBtOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
-  const [hideMoney, setHideMoney] = useState(false);
+  const [hideMoney, setHideMoney] = useState(true);
+  const [glow, setGlow] = useState(false);
+  const [showCount, setShowCount] = useState<string>("5");
+
 
   function downloadQr() {
     if (!codeQr) return;
@@ -166,12 +169,15 @@ function DriverPage() {
           setLastCode(t.verification_code);
           setLastTickets(Number(t.tickets ?? 1));
           setFlash(true);
+          setGlow(true);
           playSuccessChime();
           void sendPaymentOk(Number(t.amount ?? 0));
           refresh();
           setTimeout(() => setFlash(false), 3000);
+          setTimeout(() => setGlow(false), 10000);
         },
       )
+
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
