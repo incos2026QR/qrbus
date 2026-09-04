@@ -121,12 +121,13 @@ function PassengerPage() {
     setBusy(true);
     try {
       const coords = await getCoords();
-      const { data, error } = await supabase.rpc("pay_fare", {
+      const { data, error } = await supabase.rpc("pay_fare_group", {
         _driver_code: driver.driver_code,
-        _tickets: tickets,
+        _companions: companions,
         _lat: coords.latitud,
         _lng: coords.longitud,
       });
+
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) throw new Error("No se pudo procesar el pago");
