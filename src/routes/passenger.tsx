@@ -15,11 +15,15 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History, Eye, EyeOff } from "lucide-react";
+import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History, Eye, EyeOff, Users } from "lucide-react";
 import QRCode from "qrcode";
 
+const CATEGORY_OPTIONS: Category[] = ["general", "primaria", "secundaria", "adulto_mayor", "discapacidad"];
+
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
+
 
 type DriverInfo = {
   id: string;
@@ -33,7 +37,7 @@ type MyTx = { id: string; verification_code: string; tickets: number; created_at
 
 function PassengerPage() {
   const { profile, userId, loading, refresh } = useSession();
-  const { tarifas, precio, nombre, error: tarifasError } = useTarifas();
+  const { precio, nombre, error: tarifasError } = useTarifas();
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
@@ -192,7 +196,7 @@ function PassengerPage() {
           )}
           <div className="mt-5 text-2xl font-bold">{pass.tickets} Pasaje{pass.tickets > 1 ? "s" : ""} pagado{pass.tickets > 1 ? "s" : ""}</div>
           <p className="mt-4 text-sm text-muted-foreground">Muestra este código al chofer para validar el pago.</p>
-          <Button className="mt-5 w-full" variant="outline" onClick={() => { setPass(null); setDriver(null); setCode(""); setTickets(1); }}>
+          <Button className="mt-5 w-full" variant="outline" onClick={() => { setPass(null); setDriver(null); setCode(""); setCompanions([]); setScanning(true); }}>
             Nueva validación
           </Button>
         </div>
