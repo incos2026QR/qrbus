@@ -258,21 +258,45 @@ function PassengerPage() {
           <div className="space-y-4">
             <p className="text-sm">Chofer: <strong>{driver.first_name} {driver.paternal_surname}</strong> ({driver.driver_code})</p>
 
-            <div className="rounded-lg border p-4">
-              <p className="text-xs text-muted-foreground text-center mb-2">Cantidad de pasajes</p>
-              <div className="flex items-center justify-center gap-5">
-                <Button size="icon" variant="outline" onClick={() => setTickets((t) => Math.max(1, t - 1))} aria-label="Quitar pasaje">
-                  <Minus className="w-4 h-4" />
-                </Button>
-                <div className="text-2xl font-bold w-28 text-center">{tickets} Pasaje{tickets > 1 ? "s" : ""}</div>
-                <Button size="icon" variant="outline" onClick={() => setTickets((t) => Math.min(10, t + 1))} aria-label="Agregar pasaje">
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
-              <div className="mt-3 text-sm space-y-1">
-                <div className="flex justify-between"><span>1 {nombre(profile.category ?? "general")}</span><span>Bs {basePrice.toFixed(2)}</span></div>
-                {tickets > 1 && <div className="flex justify-between"><span>{tickets - 1} General</span><span>Bs {((tickets - 1) * GENERAL_PRICE).toFixed(2)}</span></div>}
-                <div className="flex justify-between font-bold border-t pt-1"><span>Total</span><span>Bs {total.toFixed(2)}</span></div>
+            <div className="rounded-lg border p-4 space-y-3">
+              <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-2">
+                <Users className="w-3 h-3" /> Pasajeros vinculados (acompañantes)
+              </p>
+
+              {companions.map((c, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Select
+                    value={c}
+                    onValueChange={(v) => setCompanions((arr) => arr.map((x, j) => (j === i ? (v as Category) : x)))}
+                  >
+                    <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CATEGORY_OPTIONS.map((opt) => (
+                        <SelectItem key={opt} value={opt}>{nombre(opt)} · Bs {precio(opt).toFixed(2)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button size="icon" variant="outline" aria-label="Quitar acompañante" onClick={() => setCompanions((arr) => arr.filter((_, j) => j !== i))}>
+                    <Minus className="w-4 h-4" />
+                  </Button>
+                </div>
+              ))}
+
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={tickets >= 10}
+                onClick={() => setCompanions((arr) => [...arr, (profile.category ?? "general") as Category])}
+              >
+                <Plus className="w-4 h-4 mr-2" /> Agregar acompañante
+              </Button>
+
+              <div className="mt-1 text-sm space-y-1">
+                <div className="flex justify-between"><span>1 {nombre(profile.category ?? "general")} (tú)</span><span>Bs {basePrice.toFixed(2)}</span></div>
+                {companions.map((c, i) => (
+                  <div key={i} className="flex justify-between"><span>1 {nombre(c)}</span><span>Bs {precio(c).toFixed(2)}</span></div>
+                ))}
+                <div className="flex justify-between font-bold border-t pt-1"><span>Total ({tickets} pasaje{tickets > 1 ? "s" : ""})</span><span>Bs {total.toFixed(2)}</span></div>
               </div>
             </div>
 
@@ -282,7 +306,8 @@ function PassengerPage() {
               {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Confirmar Pago (Bs {total.toFixed(2)})
             </Button>
-            <Button variant="ghost" className="w-full" onClick={() => { setDriver(null); setCode(""); setTickets(1); }}>Cancelar</Button>
+            <Button variant="ghost" className="w-full" onClick={() => { setDriver(null); setCode(""); setCompanions([]); }}>Cancelar</Button>
+
           </div>
         )}
       </Card>
