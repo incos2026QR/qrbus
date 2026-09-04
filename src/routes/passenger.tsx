@@ -365,19 +365,32 @@ function PassengerPage() {
 
 
       <Card className="p-4 mt-4">
-        <h3 className="font-semibold mb-2 flex items-center gap-2 text-sm">
-          <History className="w-4 h-4" /> Mis transacciones
-        </h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold flex items-center gap-2 text-sm">
+            <History className="w-4 h-4" /> Mis transacciones
+          </h3>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            aria-label={hideAmounts ? "Mostrar montos" : "Ocultar montos"}
+            onClick={() => setHideAmounts((v) => !v)}
+          >
+            {hideAmounts ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </Button>
+        </div>
         <div className="divide-y text-sm">
           {history.map((t) => (
             <div key={t.id} className="py-2 flex justify-between items-center gap-2">
               <span className="font-mono">{t.verification_code}</span>
               <span>{Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}</span>
+              <span className="font-semibold tabular-nums">{hideAmounts ? "••••" : `Bs ${Number(t.amount ?? 0).toFixed(2)}`}</span>
               <span className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleString()}</span>
             </div>
           ))}
           {history.length === 0 && <p className="text-muted-foreground py-3">Aún no tienes transacciones.</p>}
         </div>
+
       </Card>
     </div>
   );
