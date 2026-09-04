@@ -128,8 +128,8 @@ function PassengerPage() {
       const { data, error } = await supabase.rpc("pay_fare_group", {
         _driver_code: driver.driver_code,
         _companions: companions,
-        _lat: coords.latitud,
-        _lng: coords.longitud,
+        _lat: coords.latitud ?? undefined,
+        _lng: coords.longitud ?? undefined,
       });
 
       if (error) throw error;
