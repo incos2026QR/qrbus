@@ -76,7 +76,10 @@ function DriverPage() {
   const [btBusy, setBtBusy] = useState(false);
   const [btOpen, setBtOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
-  const [hideMoney, setHideMoney] = useState(false);
+  const [hideMoney, setHideMoney] = useState(true);
+  const [glow, setGlow] = useState(false);
+  const [showCount, setShowCount] = useState<string>("5");
+
 
   function downloadQr() {
     if (!codeQr) return;
@@ -166,12 +169,15 @@ function DriverPage() {
           setLastCode(t.verification_code);
           setLastTickets(Number(t.tickets ?? 1));
           setFlash(true);
+          setGlow(true);
           playSuccessChime();
           void sendPaymentOk(Number(t.amount ?? 0));
           refresh();
           setTimeout(() => setFlash(false), 3000);
+          setTimeout(() => setGlow(false), 10000);
         },
       )
+
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -443,11 +449,62 @@ function DriverPage() {
         </div>
       </header>
 
-      {/* Metrics */}
+      {/* 1. Última validación destacada */}
+      {txs[0] && (
+        <div
+          className={`rounded-2xl bg-emerald-500 text-white p-6 text-center shadow-lg ${glow ? "animate-pulse ring-8 ring-emerald-300/60" : ""}`}
+        >
+          <p className="text-xs uppercase tracking-[0.3em] text-white/80">Última validación</p>
+          <div className="text-5xl font-black tracking-widest tabular-nums my-2">
+            {txs[0].verification_code}
+          </div>
+          <p className="text-xl font-bold">
+            {Number(txs[0].tickets ?? 1)} Pasaje{Number(txs[0].tickets ?? 1) > 1 ? "s" : ""} · Pago recibido
+          </p>
+        </div>
+      )}
+
+      {/* 2. Validaciones recientes */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h3 className="font-semibold">Validaciones recientes</h3>
+          <div className="flex items-center gap-1">
+            {["3", "5", "10", "all"].map((v) => (
+              <Button
+                key={v}
+                size="sm"
+                variant={showCount === v ? "default" : "outline"}
+                className="h-7 px-2 text-xs"
+                onClick={() => setShowCount(v)}
+              >
+                {v === "all" ? "Todas" : v}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div className="divide-y text-sm">
+          {(showCount === "all" ? txs : txs.slice(0, Number(showCount))).map((t) => (
+            <div key={t.id} className="py-2 flex justify-between items-center gap-2">
+              <span className="font-mono text-base font-bold">{t.verification_code}</span>
+              <span>
+                {Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {new Date(t.created_at).toLocaleTimeString()}
+              </span>
+            </div>
+          ))}
+          {txs.length === 0 && (
+            <p className="text-muted-foreground py-3">Aún no hay validaciones hoy.</p>
+          )}
+        </div>
+      </Card>
+
+      {/* 3. Métricas consolidadas (abajo, por privacidad) */}
       <Card className="p-5 space-y-4">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Total Hoy</p>
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Total recaudado hoy</p>
             <div className="text-4xl font-black">{money(totalToday)}</div>
           </div>
           <Button
@@ -476,27 +533,6 @@ function DriverPage() {
         </div>
       </Card>
 
-
-
-      <Card className="p-4">
-        <h3 className="font-semibold mb-2">Últimas validaciones</h3>
-        <div className="divide-y text-sm">
-          {txs.slice(0, 10).map((t) => (
-            <div key={t.id} className="py-2 flex justify-between items-center gap-2">
-              <span className="font-mono">{t.verification_code}</span>
-              <span>
-                {Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {new Date(t.created_at).toLocaleTimeString()}
-              </span>
-            </div>
-          ))}
-          {txs.length === 0 && (
-            <p className="text-muted-foreground py-3">Aún no hay validaciones hoy.</p>
-          )}
-        </div>
-      </Card>
     </div>
   );
 }

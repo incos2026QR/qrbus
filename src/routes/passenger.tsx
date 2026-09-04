@@ -15,11 +15,15 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History, Eye, EyeOff } from "lucide-react";
+import { LogOut, Loader2, Flag, Wallet, Plus, Minus, QrCode, ScanLine, Keyboard, History, Eye, EyeOff, Users } from "lucide-react";
 import QRCode from "qrcode";
 
+const CATEGORY_OPTIONS: Category[] = ["general", "primaria", "secundaria", "adulto_mayor", "discapacidad"];
+
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
+
 
 type DriverInfo = {
   id: string;
@@ -29,7 +33,7 @@ type DriverInfo = {
   bank_account: string | null;
 };
 
-type MyTx = { id: string; verification_code: string; tickets: number; created_at: string };
+type MyTx = { id: string; verification_code: string; tickets: number; created_at: string; amount: number };
 
 function PassengerPage() {
   const { profile, userId, loading, refresh } = useSession();
@@ -37,12 +41,14 @@ function PassengerPage() {
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
-  const [tickets, setTickets] = useState(1);
-  const [scanning, setScanning] = useState(false);
+  const [companions, setCompanions] = useState<Category[]>([]);
+  const [scanning, setScanning] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<{ vcode: string; selfieUrl: string | null; tickets: number } | null>(null);
   const [history, setHistory] = useState<MyTx[]>([]);
-  const [hideBalance, setHideBalance] = useState(false);
+  const [hideBalance, setHideBalance] = useState(true);
+  const [hideAmounts, setHideAmounts] = useState(true);
+
 
 
   // Top-up modal
@@ -68,7 +74,7 @@ function PassengerPage() {
     if (!userId) return;
     const { data } = await supabase
       .from("transactions")
-      .select("id, verification_code, tickets, created_at")
+      .select("id, verification_code, tickets, created_at, amount")
       .eq("passenger_id", userId)
       .order("created_at", { ascending: false })
       .limit(15);
@@ -77,9 +83,9 @@ function PassengerPage() {
   useEffect(() => { loadHistory(); }, [userId]);
 
   const balance = Number(profile?.balance ?? 0);
-  const GENERAL_PRICE = precio("general");
   const basePrice = precio(profile?.category ?? "general");
-  const total = basePrice + (tickets - 1) * GENERAL_PRICE;
+  const total = basePrice + companions.reduce((s, c) => s + precio(c), 0);
+  const tickets = 1 + companions.length;
 
   async function findDriver(rawCode: string) {
     const clean = rawCode.trim().toUpperCase().replace(/^.*[/:]/, "");
@@ -88,9 +94,10 @@ function PassengerPage() {
     const row = Array.isArray(data) ? (data[0] as DriverInfo | undefined) : (data as DriverInfo | null);
     if (error || !row) return toast.error("Chofer no encontrado o no activo");
     setCode(clean);
-    setTickets(1);
+    setCompanions([]);
     setDriver(row);
   }
+
 
   async function doTopup() {
     const amount = Number(topupAmount);
@@ -118,12 +125,13 @@ function PassengerPage() {
     setBusy(true);
     try {
       const coords = await getCoords();
-      const { data, error } = await supabase.rpc("pay_fare", {
+      const { data, error } = await supabase.rpc("pay_fare_group", {
         _driver_code: driver.driver_code,
-        _tickets: tickets,
-        _lat: coords.latitud,
-        _lng: coords.longitud,
+        _companions: companions,
+        _lat: coords.latitud ?? undefined,
+        _lng: coords.longitud ?? undefined,
       });
+
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) throw new Error("No se pudo procesar el pago");
@@ -188,7 +196,7 @@ function PassengerPage() {
           )}
           <div className="mt-5 text-2xl font-bold">{pass.tickets} Pasaje{pass.tickets > 1 ? "s" : ""} pagado{pass.tickets > 1 ? "s" : ""}</div>
           <p className="mt-4 text-sm text-muted-foreground">Muestra este código al chofer para validar el pago.</p>
-          <Button className="mt-5 w-full" variant="outline" onClick={() => { setPass(null); setDriver(null); setCode(""); setTickets(1); }}>
+          <Button className="mt-5 w-full" variant="outline" onClick={() => { setPass(null); setDriver(null); setCode(""); setCompanions([]); setScanning(true); }}>
             Nueva validación
           </Button>
         </div>
@@ -254,21 +262,45 @@ function PassengerPage() {
           <div className="space-y-4">
             <p className="text-sm">Chofer: <strong>{driver.first_name} {driver.paternal_surname}</strong> ({driver.driver_code})</p>
 
-            <div className="rounded-lg border p-4">
-              <p className="text-xs text-muted-foreground text-center mb-2">Cantidad de pasajes</p>
-              <div className="flex items-center justify-center gap-5">
-                <Button size="icon" variant="outline" onClick={() => setTickets((t) => Math.max(1, t - 1))} aria-label="Quitar pasaje">
-                  <Minus className="w-4 h-4" />
-                </Button>
-                <div className="text-2xl font-bold w-28 text-center">{tickets} Pasaje{tickets > 1 ? "s" : ""}</div>
-                <Button size="icon" variant="outline" onClick={() => setTickets((t) => Math.min(10, t + 1))} aria-label="Agregar pasaje">
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
-              <div className="mt-3 text-sm space-y-1">
-                <div className="flex justify-between"><span>1 {nombre(profile.category ?? "general")}</span><span>Bs {basePrice.toFixed(2)}</span></div>
-                {tickets > 1 && <div className="flex justify-between"><span>{tickets - 1} General</span><span>Bs {((tickets - 1) * GENERAL_PRICE).toFixed(2)}</span></div>}
-                <div className="flex justify-between font-bold border-t pt-1"><span>Total</span><span>Bs {total.toFixed(2)}</span></div>
+            <div className="rounded-lg border p-4 space-y-3">
+              <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-2">
+                <Users className="w-3 h-3" /> Pasajeros vinculados (acompañantes)
+              </p>
+
+              {companions.map((c, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Select
+                    value={c}
+                    onValueChange={(v) => setCompanions((arr) => arr.map((x, j) => (j === i ? (v as Category) : x)))}
+                  >
+                    <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CATEGORY_OPTIONS.map((opt) => (
+                        <SelectItem key={opt} value={opt}>{nombre(opt)} · Bs {precio(opt).toFixed(2)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button size="icon" variant="outline" aria-label="Quitar acompañante" onClick={() => setCompanions((arr) => arr.filter((_, j) => j !== i))}>
+                    <Minus className="w-4 h-4" />
+                  </Button>
+                </div>
+              ))}
+
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={tickets >= 10}
+                onClick={() => setCompanions((arr) => [...arr, (profile.category ?? "general") as Category])}
+              >
+                <Plus className="w-4 h-4 mr-2" /> Agregar acompañante
+              </Button>
+
+              <div className="mt-1 text-sm space-y-1">
+                <div className="flex justify-between"><span>1 {nombre(profile.category ?? "general")} (tú)</span><span>Bs {basePrice.toFixed(2)}</span></div>
+                {companions.map((c, i) => (
+                  <div key={i} className="flex justify-between"><span>1 {nombre(c)}</span><span>Bs {precio(c).toFixed(2)}</span></div>
+                ))}
+                <div className="flex justify-between font-bold border-t pt-1"><span>Total ({tickets} pasaje{tickets > 1 ? "s" : ""})</span><span>Bs {total.toFixed(2)}</span></div>
               </div>
             </div>
 
@@ -278,7 +310,8 @@ function PassengerPage() {
               {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Confirmar Pago (Bs {total.toFixed(2)})
             </Button>
-            <Button variant="ghost" className="w-full" onClick={() => { setDriver(null); setCode(""); setTickets(1); }}>Cancelar</Button>
+            <Button variant="ghost" className="w-full" onClick={() => { setDriver(null); setCode(""); setCompanions([]); }}>Cancelar</Button>
+
           </div>
         )}
       </Card>
@@ -332,19 +365,32 @@ function PassengerPage() {
 
 
       <Card className="p-4 mt-4">
-        <h3 className="font-semibold mb-2 flex items-center gap-2 text-sm">
-          <History className="w-4 h-4" /> Mis transacciones
-        </h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold flex items-center gap-2 text-sm">
+            <History className="w-4 h-4" /> Mis transacciones
+          </h3>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            aria-label={hideAmounts ? "Mostrar montos" : "Ocultar montos"}
+            onClick={() => setHideAmounts((v) => !v)}
+          >
+            {hideAmounts ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </Button>
+        </div>
         <div className="divide-y text-sm">
           {history.map((t) => (
             <div key={t.id} className="py-2 flex justify-between items-center gap-2">
               <span className="font-mono">{t.verification_code}</span>
               <span>{Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}</span>
+              <span className="font-semibold tabular-nums">{hideAmounts ? "••••" : `Bs ${Number(t.amount ?? 0).toFixed(2)}`}</span>
               <span className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleString()}</span>
             </div>
           ))}
           {history.length === 0 && <p className="text-muted-foreground py-3">Aún no tienes transacciones.</p>}
         </div>
+
       </Card>
     </div>
   );

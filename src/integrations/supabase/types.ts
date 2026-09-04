@@ -348,6 +348,23 @@ export type Database = {
               verification_code: string
             }[]
           }
+      pay_fare_group: {
+        Args: {
+          _companions?: Database["public"]["Enums"]["fare_category"][]
+          _driver_code: string
+          _lat?: number
+          _lng?: number
+        }
+        Returns: {
+          base_amount: number
+          category: Database["public"]["Enums"]["fare_category"]
+          extra_amount: number
+          new_balance: number
+          tickets: number
+          total: number
+          verification_code: string
+        }[]
+      }
       topup_wallet: {
         Args: { _amount: number; _method?: string }
         Returns: number
