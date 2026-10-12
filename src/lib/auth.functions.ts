@@ -65,15 +65,13 @@ export const seedAccounts = createServerFn({ method: "POST" }).handler(async () 
       results.push({ email: acc.email, created: false, updated: false });
       continue;
     }
-    await supabaseAdmin.from("profiles").upsert({
+    await upsertRoleRow(supabaseAdmin, acc.role, {
       id: user.user.id,
-      role: acc.role as "admin" | "supervisor" | "driver" | "passenger",
-      status: "active",
       first_name: acc.first,
       paternal_surname: acc.surname,
       email: acc.email,
       ...extra,
-    }, { onConflict: "id" });
+    });
     await supabaseAdmin.from("user_roles").upsert(
       { user_id: user.user.id, role: acc.role as "admin" | "supervisor" | "driver" | "passenger" },
       { onConflict: "user_id,role" },
@@ -84,11 +82,24 @@ export const seedAccounts = createServerFn({ method: "POST" }).handler(async () 
 });
 
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function upsertRoleRow(admin: any, role: string, row: Record<string, unknown>) {
+  const { category, bank_name, bank_account, transport_line, driver_code, status, ...base } = row as Record<string, unknown>;
+  if (role === "passenger") {
+    return admin.from("passengers").upsert({ ...base, status: status ?? "active", fare_category: category ?? "general" }, { onConflict: "id" });
+  }
+  if (role === "driver") {
+    return admin.from("drivers").upsert({ ...base, status: status ?? "active", bank_name, bank_account, transport_line, driver_code }, { onConflict: "id" });
+  }
+  const { balance: _b, ...staff } = base;
+  return admin.from("admins_supervisors").upsert({ id: staff.id, first_name: staff.first_name, paternal_surname: staff.paternal_surname, email: staff.email, phone: staff.phone ?? null, role }, { onConflict: "id" });
+}
+
 export const generateDriverCode = createServerFn({ method: "POST" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   for (let i = 0; i < 20; i++) {
     const code = "DRV" + Math.floor(10 + Math.random() * 90).toString();
-    const { data } = await supabaseAdmin.from("profiles").select("id").eq("driver_code", code).maybeSingle();
+    const { data } = await (supabaseAdmin as any).from("drivers").select("id").eq("driver_code", code).maybeSingle();
     if (!data) return { code };
   }
   const code = "D" + Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -101,7 +112,6 @@ export const grantRole = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("user_roles").upsert({ user_id: data.userId, role: data.role });
-    await supabaseAdmin.from("profiles").update({ role: data.role }).eq("id", data.userId);
     return { ok: true };
   });
 
@@ -132,10 +142,8 @@ export const createSupervisor = createServerFn({ method: "POST" })
       email_confirm: true,
     });
     if (error || !user.user) throw new Error(error?.message ?? "No se pudo crear el usuario");
-    const { error: pErr } = await supabaseAdmin.from("profiles").insert({
+    const { error: pErr } = await upsertRoleRow(supabaseAdmin, "supervisor", {
       id: user.user.id,
-      role: "supervisor",
-      status: "active",
       first_name: data.first_name,
       paternal_surname: data.paternal_surname ?? null,
       email: data.email,
