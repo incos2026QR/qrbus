@@ -119,9 +119,10 @@ export function DriverRegister() {
       urls.license_url = await up("kyc-documents", "license", s.files.license!);
       urls.union_doc_url = await up("kyc-documents", "union_doc", s.files.union_doc!);
 
-      // 3) Insertar el perfil completo (ya no hay trigger que lo cree)
-      const { error: pErr } = await supabase.from("profiles").upsert({
-        id: userId, role: "driver", status: "pending",
+      // 3) Insertar en la tabla de choferes
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: pErr } = await (supabase as any).from("drivers").upsert({
+        id: userId,
         first_name: s.first_name, paternal_surname: s.paternal_surname, maternal_surname: s.maternal_surname,
         ci_number: s.ci_number, birthdate: s.birthdate, phone: s.phone, email,
         bank_account: cuenta, bank_name: s.bank_name, transport_line: s.transport_line,

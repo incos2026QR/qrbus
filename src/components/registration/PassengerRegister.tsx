@@ -157,11 +157,10 @@ export function PassengerRegister() {
         uploads.extra_doc_url = await uploadImage(supabase, "kyc-documents", `${userId}/extra.jpg`, extra);
       }
 
-      // 3) Insertar el perfil completo (ya no hay trigger que lo cree)
-      const { error: profErr } = await supabase.from("profiles").upsert({
+      // 3) Insertar en la tabla de pasajeros
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: profErr } = await (supabase as any).from("passengers").upsert({
         id: userId,
-        role: "passenger",
-        status: "pending",
         first_name: s.first_name,
         paternal_surname: s.paternal_surname,
         maternal_surname: s.maternal_surname,
@@ -169,9 +168,7 @@ export function PassengerRegister() {
         birthdate: s.birthdate,
         phone: s.phone,
         email,
-        category: finalCategory,
-        bank_account: cuenta,
-        bank_name: s.bank_name,
+        fare_category: finalCategory,
         ...uploads,
       }, { onConflict: "id" });
       if (profErr) throw new Error(`No se pudo crear el perfil: ${profErr.message}`);
