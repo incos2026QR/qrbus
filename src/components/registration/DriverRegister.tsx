@@ -3,10 +3,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { Loader2, Sparkles } from "lucide-react";
-import { generateDriverCode } from "@/lib/auth.functions";
 import { uploadImage, makeSampleImage } from "@/lib/image";
 import { cleanAccount, formatAccount, createAccount } from "@/lib/bank";
 import { useBancos, useLineasTransporte } from "@/lib/catalogs";
@@ -14,17 +19,32 @@ import { Captcha } from "@/components/Captcha";
 import { FilePick } from "./PassengerRegister";
 
 type State = {
-  phone: string; password: string; email: string;
-  first_name: string; paternal_surname: string; maternal_surname: string;
-  ci_number: string; birthdate: string; bank_account: string; bank_name: string;
+  phone: string;
+  password: string;
+  email: string;
+  first_name: string;
+  paternal_surname: string;
+  maternal_surname: string;
+  ci_number: string;
+  birthdate: string;
+  bank_account: string;
+  bank_name: string;
   transport_line: string;
   files: { ci_front?: Blob; ci_back?: Blob; selfie?: Blob; license?: Blob; union_doc?: Blob };
 };
 
 const initial: State = {
-  phone: "", password: "", email: "",
-  first_name: "", paternal_surname: "", maternal_surname: "", ci_number: "", birthdate: "",
-  bank_account: "", bank_name: "", transport_line: "",
+  phone: "",
+  password: "",
+  email: "",
+  first_name: "",
+  paternal_surname: "",
+  maternal_surname: "",
+  ci_number: "",
+  birthdate: "",
+  bank_account: "",
+  bank_name: "",
+  transport_line: "",
   files: {},
 };
 
@@ -69,7 +89,8 @@ export function DriverRegister() {
       { key: "union_doc", label: "la credencial de línea / carnet de sindicato" },
     ];
     for (const n of need) if (!s.files[n.key]) return toast.error(`Falta ${n.label}`);
-    if (!s.phone || !s.password || !s.first_name || !s.ci_number || !s.birthdate) return toast.error("Completa todos los datos");
+    if (!s.phone || !s.password || !s.first_name || !s.ci_number || !s.birthdate)
+      return toast.error("Completa todos los datos");
     if (!s.transport_line) return toast.error("Selecciona tu línea de micro / transporte");
     if (!s.bank_name) return toast.error("Selecciona tu banco");
     const cuenta = cleanAccount(s.bank_account);
@@ -87,7 +108,18 @@ export function DriverRegister() {
         password: s.password,
         options: {
           emailRedirectTo: window.location.origin,
-          data: { phone: s.phone, role: "driver", first_name: s.first_name, paternal_surname: s.paternal_surname },
+          data: {
+            role: "driver",
+            phone: s.phone,
+            first_name: s.first_name,
+            paternal_surname: s.paternal_surname,
+            maternal_surname: s.maternal_surname,
+            ci_number: s.ci_number,
+            birthdate: s.birthdate,
+            bank_account: cuenta,
+            bank_name: s.bank_name,
+            transport_line: s.transport_line,
+          },
         },
       });
       if (signUpErr) {
@@ -101,13 +133,15 @@ export function DriverRegister() {
       // 2) Asegurar sesión activa para subir documentos e insertar el perfil
       let userId = signUpData.user?.id ?? null;
       if (!signUpData.session) {
-        const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password: s.password });
-        if (error) throw new Error(`Cuenta creada, pero no se pudo iniciar sesión: ${error.message}`);
+        const { data: signInData, error } = await supabase.auth.signInWithPassword({
+          email,
+          password: s.password,
+        });
+        if (error)
+          throw new Error(`Cuenta creada, pero no se pudo iniciar sesión: ${error.message}`);
         userId = signInData.user?.id ?? userId;
       }
       if (!userId) throw new Error("No se pudo obtener el usuario creado");
-
-      const { code } = await generateDriverCode();
 
       const up = async (bucket: string, name: string, blob: Blob) =>
         await uploadImage(supabase, bucket, `${userId}/${name}.jpg`, blob);
@@ -119,18 +153,27 @@ export function DriverRegister() {
       urls.license_url = await up("kyc-documents", "license", s.files.license!);
       urls.union_doc_url = await up("kyc-documents", "union_doc", s.files.union_doc!);
 
-      // 3) Insertar en la tabla de choferes
+      // 3) El trigger de auth.users ya creó la fila y el código; completar documentos.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: pErr } = await (supabase as any).from("drivers").upsert({
-        id: userId,
-        first_name: s.first_name, paternal_surname: s.paternal_surname, maternal_surname: s.maternal_surname,
-        ci_number: s.ci_number, birthdate: s.birthdate, phone: s.phone, email,
-        bank_account: cuenta, bank_name: s.bank_name, transport_line: s.transport_line,
-        driver_code: code, ...urls,
-      }, { onConflict: "id" });
+      const { data: driver, error: pErr } = await (supabase as any)
+        .from("drivers")
+        .update({
+          first_name: s.first_name,
+          paternal_surname: s.paternal_surname,
+          maternal_surname: s.maternal_surname,
+          ci_number: s.ci_number,
+          birthdate: s.birthdate,
+          phone: s.phone,
+          email,
+          bank_account: cuenta,
+          bank_name: s.bank_name,
+          transport_line: s.transport_line,
+          ...urls,
+        })
+        .eq("id", userId)
+        .select("driver_code")
+        .single();
       if (pErr) throw new Error(`No se pudo crear el perfil del chofer: ${pErr.message}`);
-      const { error: rErr } = await supabase.from("user_roles").insert({ user_id: userId, role: "driver" });
-      if (rErr) toast.warning(`Perfil creado, pero el rol no se registró: ${rErr.message}`);
 
       try {
         await createAccount(cuenta, `${s.first_name} ${s.paternal_surname}`.trim(), s.bank_name);
@@ -138,12 +181,15 @@ export function DriverRegister() {
         /* la cuenta ya podría existir en el banco */
       }
 
-      toast.success(`Registrado. Código de chofer: ${code} · ${formatAccount(s.bank_name, cuenta)}. Pendiente de aprobación.`);
+      toast.success(
+        `Registrado. Código de chofer: ${driver.driver_code} · ${formatAccount(s.bank_name, cuenta)}. Pendiente de aprobación.`,
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error de red o registro. Intenta nuevamente.");
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
-
 
   return (
     <form onSubmit={submit} className="space-y-3">
@@ -152,34 +198,96 @@ export function DriverRegister() {
           No se pudieron cargar los bancos o las líneas de transporte. Intenta nuevamente más tarde.
         </div>
       )}
-      <Button type="button" variant="outline" onClick={autofill} className="w-full border-primary text-primary">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={autofill}
+        className="w-full border-primary text-primary"
+      >
         <Sparkles className="w-4 h-4 mr-2" /> Cargar Datos de Prueba
       </Button>
       <p className="text-xs text-muted-foreground text-center -mt-2">(Contraseña: Password123!)</p>
       <div className="grid grid-cols-2 gap-2">
-        <div><Label>Teléfono *</Label><Input value={s.phone} onChange={(e) => setS({ ...s, phone: e.target.value })} /></div>
-        <div><Label>Contraseña *</Label><Input type="password" value={s.password} onChange={(e) => setS({ ...s, password: e.target.value })} /></div>
-        <div className="col-span-2"><Label>Correo electrónico (opcional)</Label><Input type="email" value={s.email} onChange={(e) => setS({ ...s, email: e.target.value })} /></div>
-        <div><Label>Nombres *</Label><Input value={s.first_name} onChange={(e) => setS({ ...s, first_name: e.target.value })} /></div>
-        <div><Label>Ap. Paterno *</Label><Input value={s.paternal_surname} onChange={(e) => setS({ ...s, paternal_surname: e.target.value })} /></div>
-        <div><Label>Ap. Materno</Label><Input value={s.maternal_surname} onChange={(e) => setS({ ...s, maternal_surname: e.target.value })} /></div>
-        <div><Label>CI *</Label><Input value={s.ci_number} onChange={(e) => setS({ ...s, ci_number: e.target.value })} /></div>
-        <div className="col-span-2"><Label>Fecha de nacimiento *</Label><Input type="date" value={s.birthdate} onChange={(e) => setS({ ...s, birthdate: e.target.value })} /></div>
+        <div>
+          <Label>Teléfono *</Label>
+          <Input value={s.phone} onChange={(e) => setS({ ...s, phone: e.target.value })} />
+        </div>
+        <div>
+          <Label>Contraseña *</Label>
+          <Input
+            type="password"
+            value={s.password}
+            onChange={(e) => setS({ ...s, password: e.target.value })}
+          />
+        </div>
+        <div className="col-span-2">
+          <Label>Correo electrónico (opcional)</Label>
+          <Input
+            type="email"
+            value={s.email}
+            onChange={(e) => setS({ ...s, email: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label>Nombres *</Label>
+          <Input
+            value={s.first_name}
+            onChange={(e) => setS({ ...s, first_name: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label>Ap. Paterno *</Label>
+          <Input
+            value={s.paternal_surname}
+            onChange={(e) => setS({ ...s, paternal_surname: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label>Ap. Materno</Label>
+          <Input
+            value={s.maternal_surname}
+            onChange={(e) => setS({ ...s, maternal_surname: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label>CI *</Label>
+          <Input value={s.ci_number} onChange={(e) => setS({ ...s, ci_number: e.target.value })} />
+        </div>
+        <div className="col-span-2">
+          <Label>Fecha de nacimiento *</Label>
+          <Input
+            type="date"
+            value={s.birthdate}
+            onChange={(e) => setS({ ...s, birthdate: e.target.value })}
+          />
+        </div>
         <div className="col-span-2">
           <Label>Línea de micro / transporte *</Label>
           <Select value={s.transport_line} onValueChange={(v) => setS({ ...s, transport_line: v })}>
-            <SelectTrigger><SelectValue placeholder="Selecciona tu línea" /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecciona tu línea" />
+            </SelectTrigger>
             <SelectContent>
-              {lineas.map((l) => <SelectItem key={l.id} value={l.nombre}>{l.nombre}</SelectItem>)}
+              {lineas.map((l) => (
+                <SelectItem key={l.id} value={l.nombre}>
+                  {l.nombre}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
         <div className="col-span-2">
           <Label>Banco *</Label>
           <Select value={s.bank_name} onValueChange={(v) => setS({ ...s, bank_name: v })}>
-            <SelectTrigger><SelectValue placeholder="Selecciona tu banco" /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecciona tu banco" />
+            </SelectTrigger>
             <SelectContent>
-              {bancos.map((b) => <SelectItem key={b.id} value={b.nombre}>{b.nombre}</SelectItem>)}
+              {bancos.map((b) => (
+                <SelectItem key={b.id} value={b.nombre}>
+                  {b.nombre}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -191,16 +299,38 @@ export function DriverRegister() {
             onChange={(e) => setS({ ...s, bank_account: cleanAccount(e.target.value) })}
             placeholder="Ej. 104578"
           />
-          <p className="text-xs text-muted-foreground mt-1">{formatAccount(s.bank_name, s.bank_account)}</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {formatAccount(s.bank_name, s.bank_account)}
+          </p>
         </div>
       </div>
       <div className="pt-2 space-y-2">
         <h4 className="font-semibold text-sm">Documentos de verificación de identidad</h4>
-        <FilePick label="CI Frontal *" file={s.files.ci_front} onFile={(f) => setS({ ...s, files: { ...s.files, ci_front: f } })} />
-        <FilePick label="CI Reverso *" file={s.files.ci_back} onFile={(f) => setS({ ...s, files: { ...s.files, ci_back: f } })} />
-        <FilePick label="Selfie con CI *" file={s.files.selfie} onFile={(f) => setS({ ...s, files: { ...s.files, selfie: f } })} />
-        <FilePick label="Licencia de Conducir *" file={s.files.license} onFile={(f) => setS({ ...s, files: { ...s.files, license: f } })} />
-        <FilePick label="Credencial de Línea / Carnet de Sindicato *" file={s.files.union_doc} onFile={(f) => setS({ ...s, files: { ...s.files, union_doc: f } })} />
+        <FilePick
+          label="CI Frontal *"
+          file={s.files.ci_front}
+          onFile={(f) => setS({ ...s, files: { ...s.files, ci_front: f } })}
+        />
+        <FilePick
+          label="CI Reverso *"
+          file={s.files.ci_back}
+          onFile={(f) => setS({ ...s, files: { ...s.files, ci_back: f } })}
+        />
+        <FilePick
+          label="Selfie con CI *"
+          file={s.files.selfie}
+          onFile={(f) => setS({ ...s, files: { ...s.files, selfie: f } })}
+        />
+        <FilePick
+          label="Licencia de Conducir *"
+          file={s.files.license}
+          onFile={(f) => setS({ ...s, files: { ...s.files, license: f } })}
+        />
+        <FilePick
+          label="Credencial de Línea / Carnet de Sindicato *"
+          file={s.files.union_doc}
+          onFile={(f) => setS({ ...s, files: { ...s.files, union_doc: f } })}
+        />
       </div>
       <Captcha verified={captchaOk} onVerify={setCaptchaOk} />
       <Button type="submit" disabled={busy} className="w-full">

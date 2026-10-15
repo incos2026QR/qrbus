@@ -2,6 +2,9 @@
   "name": "tanstack_start_ts",
   "version": "2.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "sideEffects": false,
   "type": "module",
   "scripts": {
@@ -89,5 +92,13 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^8.0.16"
+  },
+  "optionalDependencies": {
+    "@oxc-parser/binding-linux-x64-gnu": "0.120.0",
+    "@oxc-parser/binding-linux-x64-musl": "0.120.0",
+    "@oxc-parser/binding-win32-x64-msvc": "0.120.0",
+    "@rolldown/binding-linux-x64-gnu": "1.2.3",
+    "@rolldown/binding-linux-x64-musl": "1.2.3",
+    "@rolldown/binding-win32-x64-msvc": "1.2.3"
   }
 }
