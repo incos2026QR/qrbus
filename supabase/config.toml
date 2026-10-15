@@ -1,1 +1,4 @@
-project_id = "tqaprobfxuoqwssslzkh"
+project_id = "sjqrgmvrpdykeisxtqqo"
+
+[functions.bank-topup]
+verify_jwt = true

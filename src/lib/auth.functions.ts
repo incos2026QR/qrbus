@@ -1,126 +1,83 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
-
-const signUpSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-  phone: z.string().optional(),
-});
-
-export const signUpAutoConfirm = createServerFn({ method: "POST" })
-  .inputValidator((d) => signUpSchema.parse(d))
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: user, error } = await supabaseAdmin.auth.admin.createUser({
-      email: data.email,
-      password: data.password,
-      phone: data.phone,
-      email_confirm: true,
-      phone_confirm: !!data.phone,
-    });
-    if (error) throw new Error(error.message);
-    return { userId: user.user!.id };
-  });
-
-export const seedAccounts = createServerFn({ method: "POST" }).handler(async () => {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const accounts = [
-    { email: "incos2026@gmail.com", password: "4Dmin-1234", role: "admin", first: "Master", surname: "Admin" },
-    { email: "supervisor1@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Uno" },
-    { email: "supervisor2@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Dos" },
-    { email: "supervisor3@pagojusto.bo", password: "Super123!", role: "supervisor", first: "Supervisor", surname: "Tres" },
-    {
-      email: "choferapi@pagojusto.bo", password: "Password123!", role: "driver", first: "Chofer", surname: "API",
-      extra: { driver_code: "DRV93", phone: "70000093", bank_name: "Banco Unión", bank_account: "104593", transport_line: "Línea 1" },
-    },
-    {
-      email: "pasajeroapi@pagojusto.bo", password: "Password123!", role: "passenger", first: "Pasajero", surname: "API",
-      extra: { category: "general" as const, phone: "70000094", bank_name: "Banco Unión", bank_account: "104594", balance: 50 },
-    },
-  ] as const;
-
-  const results: { email: string; created: boolean; updated: boolean }[] = [];
-  for (const acc of accounts) {
-    const extra = "extra" in acc ? acc.extra : {};
-    const { data: existing } = await supabaseAdmin
-      .from("profiles")
-      .select("id")
-      .eq("email", acc.email)
-      .maybeSingle();
-    if (existing) {
-      // Reset password so demo credentials always work.
-      await supabaseAdmin.auth.admin.updateUserById(existing.id, {
-        password: acc.password,
-        email_confirm: true,
-      });
-      results.push({ email: acc.email, created: false, updated: true });
-      continue;
-    }
-    const { data: user, error } = await supabaseAdmin.auth.admin.createUser({
-      email: acc.email,
-      password: acc.password,
-      email_confirm: true,
-    });
-    if (error || !user.user) {
-      results.push({ email: acc.email, created: false, updated: false });
-      continue;
-    }
-    await upsertRoleRow(supabaseAdmin, acc.role, {
-      id: user.user.id,
-      first_name: acc.first,
-      paternal_surname: acc.surname,
-      email: acc.email,
-      ...extra,
-    });
-    await supabaseAdmin.from("user_roles").upsert(
-      { user_id: user.user.id, role: acc.role as "admin" | "supervisor" | "driver" | "passenger" },
-      { onConflict: "user_id,role" },
-    );
-    results.push({ email: acc.email, created: true, updated: false });
-  }
-  return { results };
-});
-
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function upsertRoleRow(admin: any, role: string, row: Record<string, unknown>) {
-  const { category, bank_name, bank_account, transport_line, driver_code, status, ...base } = row as Record<string, unknown>;
+  const { category, bank_name, bank_account, transport_line, driver_code, status, ...base } = row;
   if (role === "passenger") {
-    return admin.from("passengers").upsert({ ...base, status: status ?? "active", fare_category: category ?? "general" }, { onConflict: "id" });
+    return admin.from("passengers").upsert(
+      {
+        ...base,
+        status: status ?? "active",
+        fare_category: category ?? "general",
+        bank_name,
+        bank_account,
+      },
+      { onConflict: "id" },
+    );
   }
   if (role === "driver") {
-    return admin.from("drivers").upsert({ ...base, status: status ?? "active", bank_name, bank_account, transport_line, driver_code }, { onConflict: "id" });
+    return admin.from("drivers").upsert(
+      {
+        ...base,
+        status: status ?? "active",
+        bank_name,
+        bank_account,
+        transport_line,
+        driver_code,
+      },
+      { onConflict: "id" },
+    );
   }
-  const { balance: _b, ...staff } = base;
-  return admin.from("admins_supervisors").upsert({ id: staff.id, first_name: staff.first_name, paternal_surname: staff.paternal_surname, email: staff.email, phone: staff.phone ?? null, role }, { onConflict: "id" });
+  return admin.from("admins_supervisors").upsert(
+    {
+      id: base.id,
+      first_name: base.first_name,
+      paternal_surname: base.paternal_surname,
+      email: base.email,
+      phone: base.phone ?? null,
+      role,
+    },
+    { onConflict: "id" },
+  );
 }
 
-export const generateDriverCode = createServerFn({ method: "POST" }).handler(async () => {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  for (let i = 0; i < 20; i++) {
-    const code = "DRV" + Math.floor(10 + Math.random() * 90).toString();
-    const { data } = await (supabaseAdmin as any).from("drivers").select("id").eq("driver_code", code).maybeSingle();
-    if (!data) return { code };
-  }
-  const code = "D" + Math.random().toString(36).slice(2, 6).toUpperCase();
-  return { code };
+// Server functions using service_role must independently authenticate and
+// authorize the caller; hiding buttons in the UI is not an authorization check.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function requireAdmin(admin: any) {
+  const authorization = getRequest().headers.get("authorization");
+  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
+  if (!token) throw new Error("No autorizado");
+
+  const { data: authData, error: authError } = await admin.auth.getUser(token);
+  if (authError || !authData.user) throw new Error("No autorizado");
+
+  const { data: role } = await admin
+    .from("user_roles")
+    .select("user_id")
+    .eq("user_id", authData.user.id)
+    .eq("role", "admin")
+    .maybeSingle();
+  if (!role) throw new Error("Se requiere rol de administrador");
+}
+
+const setRoleSchema = z.object({
+  userId: z.string().uuid(),
+  role: z.enum(["admin", "supervisor", "passenger", "driver"]),
 });
 
-const setRoleSchema = z.object({ userId: z.string().uuid(), role: z.enum(["admin", "supervisor", "passenger", "driver"]) });
 export const grantRole = createServerFn({ method: "POST" })
   .inputValidator((d) => setRoleSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("user_roles").upsert({ user_id: data.userId, role: data.role });
-    return { ok: true };
-  });
-
-/** Elimina un usuario de autenticación (usado para no dejar huérfanos si falla el perfil). */
-export const deleteAuthUser = createServerFn({ method: "POST" })
-  .inputValidator((d) => z.object({ userId: z.string().uuid() }).parse(d))
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.auth.admin.deleteUser(data.userId);
+    await requireAdmin(supabaseAdmin);
+    const { error } = await supabaseAdmin.from("user_roles").upsert({
+      user_id: data.userId,
+      role: data.role,
+    });
+    if (error) throw new Error(error.message);
     return { ok: true };
   });
 
@@ -136,23 +93,42 @@ export const createSupervisor = createServerFn({ method: "POST" })
   .inputValidator((d) => supervisorSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await requireAdmin(supabaseAdmin);
+
     const { data: user, error } = await supabaseAdmin.auth.admin.createUser({
       email: data.email,
       password: data.password,
       email_confirm: true,
+      user_metadata: { role: "supervisor" },
     });
     if (error || !user.user) throw new Error(error?.message ?? "No se pudo crear el usuario");
-    const { error: pErr } = await upsertRoleRow(supabaseAdmin, "supervisor", {
+
+    // The public signup trigger deliberately treats every non-driver as a
+    // passenger. This trusted admin path replaces that provisional row.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabaseAdmin as any).from("passengers").delete().eq("id", user.user.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabaseAdmin as any).from("drivers").delete().eq("id", user.user.id);
+    await supabaseAdmin.from("user_roles").delete().eq("user_id", user.user.id);
+
+    const { error: profileError } = await upsertRoleRow(supabaseAdmin, "supervisor", {
       id: user.user.id,
       first_name: data.first_name,
       paternal_surname: data.paternal_surname ?? null,
       email: data.email,
     });
-    if (pErr) {
+    if (profileError) {
       await supabaseAdmin.auth.admin.deleteUser(user.user.id);
-      throw new Error(pErr.message);
+      throw new Error(profileError.message);
     }
-    await supabaseAdmin.from("user_roles").upsert({ user_id: user.user.id, role: "supervisor" });
+
+    const { error: roleError } = await supabaseAdmin.from("user_roles").upsert({
+      user_id: user.user.id,
+      role: "supervisor",
+    });
+    if (roleError) {
+      await supabaseAdmin.auth.admin.deleteUser(user.user.id);
+      throw new Error(roleError.message);
+    }
     return { userId: user.user.id };
   });
-

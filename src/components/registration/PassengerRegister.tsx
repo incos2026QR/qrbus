@@ -4,7 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { Loader2, Sparkles, Upload, Check } from "lucide-react";
 import { uploadImage, makeSampleImage } from "@/lib/image";
@@ -41,9 +47,20 @@ type FormState = {
 };
 
 const initial: FormState = {
-  step: 1, phone: "", password: "", email: "",
-  first_name: "", paternal_surname: "", maternal_surname: "", ci_number: "", birthdate: "", bank_account: "", bank_name: "",
-  chosen: "general", hasDisability: false, files: {},
+  step: 1,
+  phone: "",
+  password: "",
+  email: "",
+  first_name: "",
+  paternal_surname: "",
+  maternal_surname: "",
+  ci_number: "",
+  birthdate: "",
+  bank_account: "",
+  bank_name: "",
+  chosen: "general",
+  hasDisability: false,
+  files: {},
 };
 
 export function PassengerRegister() {
@@ -128,7 +145,18 @@ export function PassengerRegister() {
         password: s.password,
         options: {
           emailRedirectTo: window.location.origin,
-          data: { phone: s.phone, role: "passenger", first_name: s.first_name, paternal_surname: s.paternal_surname },
+          data: {
+            role: "passenger",
+            phone: s.phone,
+            first_name: s.first_name,
+            paternal_surname: s.paternal_surname,
+            maternal_surname: s.maternal_surname,
+            ci_number: s.ci_number,
+            birthdate: s.birthdate,
+            fare_category: finalCategory,
+            bank_account: cuenta,
+            bank_name: s.bank_name,
+          },
         },
       });
       if (signUpErr) {
@@ -141,48 +169,79 @@ export function PassengerRegister() {
       // 2) Asegurar sesión activa (necesaria para subir documentos e insertar el perfil)
       let userId = signUpData.user?.id ?? null;
       if (!signUpData.session) {
-        const { data: signInData, error: signIn } = await supabase.auth.signInWithPassword({ email, password: s.password });
-        if (signIn) throw new Error(`Cuenta creada, pero no se pudo iniciar sesión: ${signIn.message}`);
+        const { data: signInData, error: signIn } = await supabase.auth.signInWithPassword({
+          email,
+          password: s.password,
+        });
+        if (signIn)
+          throw new Error(`Cuenta creada, pero no se pudo iniciar sesión: ${signIn.message}`);
         userId = signInData.user?.id ?? userId;
       }
       if (!userId) throw new Error("No se pudo obtener el usuario creado");
 
       const uploads: Record<string, string | null> = {};
-      uploads.ci_front_url = await uploadImage(supabase, "kyc-documents", `${userId}/ci_front.jpg`, s.files.ci_front!);
-      uploads.ci_back_url = await uploadImage(supabase, "kyc-documents", `${userId}/ci_back.jpg`, s.files.ci_back!);
-      uploads.selfie_url = await uploadImage(supabase, "kyc-documents", `${userId}/selfie.jpg`, s.files.selfie!);
+      uploads.ci_front_url = await uploadImage(
+        supabase,
+        "kyc-documents",
+        `${userId}/ci_front.jpg`,
+        s.files.ci_front!,
+      );
+      uploads.ci_back_url = await uploadImage(
+        supabase,
+        "kyc-documents",
+        `${userId}/ci_back.jpg`,
+        s.files.ci_back!,
+      );
+      uploads.selfie_url = await uploadImage(
+        supabase,
+        "kyc-documents",
+        `${userId}/selfie.jpg`,
+        s.files.selfie!,
+      );
       // extra_doc_url guarda el carnet de discapacidad o, en su defecto, el estudiantil.
       const extra = s.files.disability ?? s.files.university;
       if (extra) {
-        uploads.extra_doc_url = await uploadImage(supabase, "kyc-documents", `${userId}/extra.jpg`, extra);
+        uploads.extra_doc_url = await uploadImage(
+          supabase,
+          "kyc-documents",
+          `${userId}/extra.jpg`,
+          extra,
+        );
       }
 
-      // 3) Insertar en la tabla de pasajeros
+      // 3) El trigger de auth.users ya creó la fila; completar los documentos.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: profErr } = await (supabase as any).from("passengers").upsert({
-        id: userId,
-        first_name: s.first_name,
-        paternal_surname: s.paternal_surname,
-        maternal_surname: s.maternal_surname,
-        ci_number: s.ci_number,
-        birthdate: s.birthdate,
-        phone: s.phone,
-        email,
-        fare_category: finalCategory,
-        ...uploads,
-      }, { onConflict: "id" });
+      const { error: profErr } = await (supabase as any)
+        .from("passengers")
+        .update({
+          first_name: s.first_name,
+          paternal_surname: s.paternal_surname,
+          maternal_surname: s.maternal_surname,
+          ci_number: s.ci_number,
+          birthdate: s.birthdate,
+          phone: s.phone,
+          email,
+          fare_category: finalCategory,
+          bank_account: cuenta,
+          bank_name: s.bank_name,
+          ...uploads,
+        })
+        .eq("id", userId);
       if (profErr) throw new Error(`No se pudo crear el perfil: ${profErr.message}`);
-      await supabase.from("user_roles").insert({ user_id: userId, role: "passenger" });
 
       try {
         await createAccount(cuenta, `${s.first_name} ${s.paternal_surname}`.trim(), s.bank_name);
       } catch {
         /* la cuenta ya podría existir en el banco */
       }
-      toast.success(`Registro exitoso. ${formatAccount(s.bank_name, cuenta)}. Cuenta pendiente de aprobación.`);
+      toast.success(
+        `Registro exitoso. ${formatAccount(s.bank_name, cuenta)}. Cuenta pendiente de aprobación.`,
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error");
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -193,40 +252,104 @@ export function PassengerRegister() {
         </div>
       )}
       <div>
-        <Button type="button" variant="outline" onClick={autofill} className="w-full border-primary text-primary">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={autofill}
+          className="w-full border-primary text-primary"
+        >
           <Sparkles className="w-4 h-4 mr-2" /> Cargar Datos de Prueba
         </Button>
-        <p className="text-xs text-muted-foreground text-center mt-1">(Contraseña: {DEMO_PASSWORD})</p>
+        <p className="text-xs text-muted-foreground text-center mt-1">
+          (Contraseña: {DEMO_PASSWORD})
+        </p>
       </div>
       <div className="flex gap-1">
-        {[1,2,3,4].map((i) => (
-          <div key={i} className={`h-1.5 flex-1 rounded ${s.step >= i ? "bg-primary" : "bg-muted"}`} />
+        {[1, 2, 3, 4].map((i) => (
+          <div
+            key={i}
+            className={`h-1.5 flex-1 rounded ${s.step >= i ? "bg-primary" : "bg-muted"}`}
+          />
         ))}
       </div>
 
       {s.step === 1 && (
         <div className="space-y-3">
           <h3 className="font-semibold">Paso 1: Credenciales</h3>
-          <div><Label>Teléfono *</Label><Input value={s.phone} onChange={(e) => setS({...s, phone: e.target.value})} /></div>
-          <div><Label>Contraseña *</Label><Input type="password" value={s.password} onChange={(e) => setS({...s, password: e.target.value})} /></div>
-          <div><Label>Email (opcional)</Label><Input type="email" value={s.email} onChange={(e) => setS({...s, email: e.target.value})} /></div>
+          <div>
+            <Label>Teléfono *</Label>
+            <Input value={s.phone} onChange={(e) => setS({ ...s, phone: e.target.value })} />
+          </div>
+          <div>
+            <Label>Contraseña *</Label>
+            <Input
+              type="password"
+              value={s.password}
+              onChange={(e) => setS({ ...s, password: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Email (opcional)</Label>
+            <Input
+              type="email"
+              value={s.email}
+              onChange={(e) => setS({ ...s, email: e.target.value })}
+            />
+          </div>
         </div>
       )}
 
       {s.step === 2 && (
         <div className="space-y-3">
           <h3 className="font-semibold">Paso 2: Datos personales</h3>
-          <div><Label>Nombres *</Label><Input value={s.first_name} onChange={(e) => setS({...s, first_name: e.target.value})} /></div>
-          <div><Label>Apellido Paterno *</Label><Input value={s.paternal_surname} onChange={(e) => setS({...s, paternal_surname: e.target.value})} /></div>
-          <div><Label>Apellido Materno</Label><Input value={s.maternal_surname} onChange={(e) => setS({...s, maternal_surname: e.target.value})} /></div>
-          <div><Label>CI *</Label><Input value={s.ci_number} onChange={(e) => setS({...s, ci_number: e.target.value})} /></div>
-          <div><Label>Fecha de nacimiento *</Label><Input type="date" value={s.birthdate} onChange={(e) => setS({...s, birthdate: e.target.value})} /></div>
+          <div>
+            <Label>Nombres *</Label>
+            <Input
+              value={s.first_name}
+              onChange={(e) => setS({ ...s, first_name: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Apellido Paterno *</Label>
+            <Input
+              value={s.paternal_surname}
+              onChange={(e) => setS({ ...s, paternal_surname: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Apellido Materno</Label>
+            <Input
+              value={s.maternal_surname}
+              onChange={(e) => setS({ ...s, maternal_surname: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>CI *</Label>
+            <Input
+              value={s.ci_number}
+              onChange={(e) => setS({ ...s, ci_number: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Fecha de nacimiento *</Label>
+            <Input
+              type="date"
+              value={s.birthdate}
+              onChange={(e) => setS({ ...s, birthdate: e.target.value })}
+            />
+          </div>
           <div>
             <Label>Banco *</Label>
-            <Select value={s.bank_name} onValueChange={(v) => setS({...s, bank_name: v})}>
-              <SelectTrigger><SelectValue placeholder="Selecciona tu banco" /></SelectTrigger>
+            <Select value={s.bank_name} onValueChange={(v) => setS({ ...s, bank_name: v })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona tu banco" />
+              </SelectTrigger>
               <SelectContent>
-                {bancos.map((b) => <SelectItem key={b.id} value={b.nombre}>{b.nombre}</SelectItem>)}
+                {bancos.map((b) => (
+                  <SelectItem key={b.id} value={b.nombre}>
+                    {b.nombre}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -235,10 +358,12 @@ export function PassengerRegister() {
             <Input
               inputMode="numeric"
               value={s.bank_account}
-              onChange={(e) => setS({...s, bank_account: cleanAccount(e.target.value)})}
+              onChange={(e) => setS({ ...s, bank_account: cleanAccount(e.target.value) })}
               placeholder="Ej. 104578"
             />
-            <p className="text-xs text-muted-foreground mt-1">{formatAccount(s.bank_name, s.bank_account)}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {formatAccount(s.bank_name, s.bank_account)}
+            </p>
           </div>
         </div>
       )}
@@ -246,9 +371,21 @@ export function PassengerRegister() {
       {s.step === 3 && (
         <div className="space-y-3">
           <h3 className="font-semibold">Paso 3: Verificación de identidad</h3>
-          <FilePick label="Foto CI Frontal *" file={s.files.ci_front} onFile={(f) => setS({...s, files: {...s.files, ci_front: f}})} />
-          <FilePick label="Foto CI Reverso *" file={s.files.ci_back} onFile={(f) => setS({...s, files: {...s.files, ci_back: f}})} />
-          <FilePick label="Selfie sosteniendo el CI *" file={s.files.selfie} onFile={(f) => setS({...s, files: {...s.files, selfie: f}})} />
+          <FilePick
+            label="Foto CI Frontal *"
+            file={s.files.ci_front}
+            onFile={(f) => setS({ ...s, files: { ...s.files, ci_front: f } })}
+          />
+          <FilePick
+            label="Foto CI Reverso *"
+            file={s.files.ci_back}
+            onFile={(f) => setS({ ...s, files: { ...s.files, ci_back: f } })}
+          />
+          <FilePick
+            label="Selfie sosteniendo el CI *"
+            file={s.files.selfie}
+            onFile={(f) => setS({ ...s, files: { ...s.files, selfie: f } })}
+          />
         </div>
       )}
 
@@ -260,11 +397,25 @@ export function PassengerRegister() {
       )}
 
       <div className="flex gap-2 pt-2">
-        {s.step > 1 && <Button type="button" variant="outline" onClick={() => setS({...s, step: (s.step - 1) as FormState["step"]})}>Atrás</Button>}
-        {s.step < 4 && <Button type="button" onClick={next} className="ml-auto">Siguiente</Button>}
-        {s.step === 4 && <Button type="button" onClick={submit} disabled={busy} className="ml-auto">
-          {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Registrarme
-        </Button>}
+        {s.step > 1 && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setS({ ...s, step: (s.step - 1) as FormState["step"] })}
+          >
+            Atrás
+          </Button>
+        )}
+        {s.step < 4 && (
+          <Button type="button" onClick={next} className="ml-auto">
+            Siguiente
+          </Button>
+        )}
+        {s.step === 4 && (
+          <Button type="button" onClick={submit} disabled={busy} className="ml-auto">
+            {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Registrarme
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -280,27 +431,36 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
   return (
     <div className="space-y-3">
       <h3 className="font-semibold">Paso 4: Categoría de tarifa</h3>
-      <p className="text-xs text-muted-foreground">Edad calculada: <strong>{age}</strong> años</p>
+      <p className="text-xs text-muted-foreground">
+        Edad calculada: <strong>{age}</strong> años
+      </p>
 
       {bucket.forced ? (
         <div className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
-          Asignación automática: <strong>{nombre(bucket.forced)}</strong> — Bs {precio(bucket.forced).toFixed(2)}
+          Asignación automática: <strong>{nombre(bucket.forced)}</strong> — Bs{" "}
+          {precio(bucket.forced).toFixed(2)}
         </div>
       ) : (
         <>
           <Label>Selecciona tu categoría</Label>
-          <Select value={s.chosen} onValueChange={(v) => setS({...s, chosen: v as Category})}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+          <Select value={s.chosen} onValueChange={(v) => setS({ ...s, chosen: v as Category })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               {bucket.options.map((c) => (
-                <SelectItem key={c} value={c}>{nombre(c)} — Bs {precio(c).toFixed(2)}</SelectItem>
+                <SelectItem key={c} value={c}>
+                  {nombre(c)} — Bs {precio(c).toFixed(2)}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
           {bucket.requiresUniversityDoc && chosen === "secundaria" && (
-            <FilePick label="Carnet Universitario/Estudiantil *"
+            <FilePick
+              label="Carnet Universitario/Estudiantil *"
               file={s.files.university}
-              onFile={(f) => setS({...s, files: {...s.files, university: f}})} />
+              onFile={(f) => setS({ ...s, files: { ...s.files, university: f } })}
+            />
           )}
         </>
       )}
@@ -308,31 +468,56 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
       <div className="flex items-center justify-between rounded-md border p-3 mt-2">
         <div>
           <Label>¿Tienes carnet de discapacidad?</Label>
-          <p className="text-xs text-muted-foreground">Se aplicará automáticamente la tarifa más baja disponible.</p>
+          <p className="text-xs text-muted-foreground">
+            Se aplicará automáticamente la tarifa más baja disponible.
+          </p>
         </div>
-        <Switch checked={s.hasDisability} onCheckedChange={(v) => setS({...s, hasDisability: v})} />
+        <Switch
+          checked={s.hasDisability}
+          onCheckedChange={(v) => setS({ ...s, hasDisability: v })}
+        />
       </div>
       {s.hasDisability && (
-        <FilePick label="Carnet de Discapacidad *"
+        <FilePick
+          label="Carnet de Discapacidad *"
           file={s.files.disability}
-          onFile={(f) => setS({...s, files: {...s.files, disability: f}})} />
+          onFile={(f) => setS({ ...s, files: { ...s.files, disability: f } })}
+        />
       )}
 
       <div className="rounded-md bg-accent/40 p-3 text-sm">
-        Tarifa final asignada: <strong>{nombre(finalCategory)}</strong> — <strong>Bs {precio(finalCategory).toFixed(2)}</strong>
+        Tarifa final asignada: <strong>{nombre(finalCategory)}</strong> —{" "}
+        <strong>Bs {precio(finalCategory).toFixed(2)}</strong>
       </div>
     </div>
   );
 }
 
-export function FilePick({ label, file, onFile }: { label: string; file?: Blob; onFile: (f: Blob) => void }) {
+export function FilePick({
+  label,
+  file,
+  onFile,
+}: {
+  label: string;
+  file?: Blob;
+  onFile: (f: Blob) => void;
+}) {
   return (
     <div>
       <Label>{label}</Label>
       <label className="mt-1 flex items-center gap-2 cursor-pointer rounded-md border border-dashed border-input px-3 py-3 hover:bg-accent/40">
-        {file ? <Check className="w-5 h-5 text-success" /> : <Upload className="w-5 h-5 text-muted-foreground" />}
+        {file ? (
+          <Check className="w-5 h-5 text-success" />
+        ) : (
+          <Upload className="w-5 h-5 text-muted-foreground" />
+        )}
         <span className="text-sm">{file ? "Adjuntada ✓" : "Seleccionar imagen"}</span>
-        <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+        />
       </label>
     </div>
   );

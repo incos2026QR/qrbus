@@ -8,6 +8,7 @@
 -- 0. Limpieza -----------------------------------------------------------------
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+DROP FUNCTION IF EXISTS public.new_driver_code() CASCADE;
 DROP FUNCTION IF EXISTS public.create_profile_for_user() CASCADE;
 DROP FUNCTION IF EXISTS public.pay_fare(text, integer) CASCADE;
 DROP FUNCTION IF EXISTS public.pay_fare(text, integer, numeric, numeric) CASCADE;
@@ -42,7 +43,7 @@ CREATE TABLE public.user_roles (
   role public.app_role NOT NULL,
   UNIQUE (user_id, role)
 );
-GRANT SELECT, INSERT ON public.user_roles TO authenticated;
+GRANT SELECT ON public.user_roles TO authenticated;
 GRANT ALL ON public.user_roles TO service_role;
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
@@ -57,19 +58,17 @@ $$;
 
 CREATE POLICY "roles read own or admin" ON public.user_roles FOR SELECT TO authenticated
   USING (user_id = auth.uid() OR public.has_role(auth.uid(),'admin'));
--- Un usuario nuevo solo puede registrarse como pasajero o chofer
-CREATE POLICY "roles self insert" ON public.user_roles FOR INSERT TO authenticated
-  WITH CHECK (user_id = auth.uid() AND role IN ('passenger','driver'));
-
 -- 3. Tablas por rol -------------------------------------------------------------
 CREATE TABLE public.passengers (
   id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   first_name text, paternal_surname text, maternal_surname text,
   ci_number text, birthdate date, phone text, email text,
+  bank_name text, bank_account text,
   fare_category public.fare_category NOT NULL DEFAULT 'general',
   balance numeric NOT NULL DEFAULT 0,
   status public.user_status NOT NULL DEFAULT 'pending',
   ci_front_url text, ci_back_url text, selfie_url text, extra_doc_url text,
+  qr_general_url text, qr_primaria_url text, qr_secundaria_url text, qr_adulto_url text,
   rejection_reason text, resubmission_count integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -95,19 +94,17 @@ CREATE TABLE public.admins_supervisors (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-GRANT SELECT, INSERT, UPDATE ON public.passengers, public.drivers TO authenticated;
+GRANT SELECT, UPDATE ON public.passengers, public.drivers TO authenticated;
 GRANT SELECT, UPDATE ON public.admins_supervisors TO authenticated;
 GRANT ALL ON public.passengers, public.drivers, public.admins_supervisors TO service_role;
 ALTER TABLE public.passengers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.drivers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admins_supervisors ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "passengers insert own" ON public.passengers FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
 CREATE POLICY "passengers read" ON public.passengers FOR SELECT TO authenticated USING (auth.uid() = id OR public.is_staff(auth.uid()));
 CREATE POLICY "passengers update" ON public.passengers FOR UPDATE TO authenticated
   USING (auth.uid() = id OR public.is_staff(auth.uid())) WITH CHECK (auth.uid() = id OR public.is_staff(auth.uid()));
 
-CREATE POLICY "drivers insert own" ON public.drivers FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
 CREATE POLICY "drivers read" ON public.drivers FOR SELECT TO authenticated USING (auth.uid() = id OR public.is_staff(auth.uid()));
 CREATE POLICY "drivers update" ON public.drivers FOR UPDATE TO authenticated
   USING (auth.uid() = id OR public.is_staff(auth.uid())) WITH CHECK (auth.uid() = id OR public.is_staff(auth.uid()));
@@ -136,14 +133,72 @@ CREATE TRIGGER trg_protect_passengers BEFORE INSERT OR UPDATE ON public.passenge
 CREATE TRIGGER trg_protect_drivers BEFORE INSERT OR UPDATE ON public.drivers
   FOR EACH ROW EXECUTE FUNCTION public.protect_sensitive_cols();
 
+-- La fila de rol nace en la misma transacción que auth.users. Esto evita que
+-- onAuthStateChange observe un usuario sin perfil y cierre la sesión a mitad
+-- del registro. Los metadatos nunca pueden crear roles de staff.
+CREATE OR REPLACE FUNCTION public.new_driver_code()
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE _code text;
+BEGIN
+  LOOP
+    _code := upper(substr(md5(random()::text || clock_timestamp()::text), 1, 5));
+    EXIT WHEN NOT EXISTS (SELECT 1 FROM public.drivers WHERE driver_code = _code);
+  END LOOP;
+  RETURN _code;
+END; $$;
+REVOKE ALL ON FUNCTION public.new_driver_code() FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  _role public.app_role := CASE
+    WHEN NEW.raw_user_meta_data ->> 'role' = 'driver' THEN 'driver'::public.app_role
+    ELSE 'passenger'::public.app_role
+  END;
+BEGIN
+  IF _role = 'driver' THEN
+    INSERT INTO public.drivers (
+      id, first_name, paternal_surname, maternal_surname, ci_number, birthdate,
+      phone, email, bank_name, bank_account, transport_line, driver_code
+    ) VALUES (
+      NEW.id, NEW.raw_user_meta_data ->> 'first_name', NEW.raw_user_meta_data ->> 'paternal_surname',
+      NEW.raw_user_meta_data ->> 'maternal_surname', NEW.raw_user_meta_data ->> 'ci_number',
+      nullif(NEW.raw_user_meta_data ->> 'birthdate', '')::date,
+      NEW.raw_user_meta_data ->> 'phone', NEW.email,
+      NEW.raw_user_meta_data ->> 'bank_name', NEW.raw_user_meta_data ->> 'bank_account',
+      NEW.raw_user_meta_data ->> 'transport_line', public.new_driver_code()
+    );
+  ELSE
+    INSERT INTO public.passengers (
+      id, first_name, paternal_surname, maternal_surname, ci_number, birthdate,
+      phone, email, bank_name, bank_account, fare_category
+    ) VALUES (
+      NEW.id, NEW.raw_user_meta_data ->> 'first_name', NEW.raw_user_meta_data ->> 'paternal_surname',
+      NEW.raw_user_meta_data ->> 'maternal_surname', NEW.raw_user_meta_data ->> 'ci_number',
+      nullif(NEW.raw_user_meta_data ->> 'birthdate', '')::date,
+      NEW.raw_user_meta_data ->> 'phone', NEW.email,
+      NEW.raw_user_meta_data ->> 'bank_name', NEW.raw_user_meta_data ->> 'bank_account',
+      CASE WHEN NEW.raw_user_meta_data ->> 'fare_category' IN
+        ('general','primaria','secundaria','adulto_mayor','discapacidad')
+        THEN (NEW.raw_user_meta_data ->> 'fare_category')::public.fare_category
+        ELSE 'general'::public.fare_category END
+    );
+  END IF;
+
+  INSERT INTO public.user_roles (user_id, role) VALUES (NEW.id, _role);
+  RETURN NEW;
+END; $$;
+REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
+CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
 -- 4. Vista unificada "profiles" (solo lectura/edición; respeta RLS) -------------
 CREATE VIEW public.profiles WITH (security_invoker = true) AS
 SELECT id, 'passenger'::public.app_role AS role, status, first_name, paternal_surname, maternal_surname,
        ci_number, birthdate, phone, email, fare_category AS category, NULL::text AS driver_code,
-       NULL::text AS transport_line, NULL::text AS bank_name, NULL::text AS bank_account, balance,
+       NULL::text AS transport_line, bank_name, bank_account, balance,
        ci_front_url, ci_back_url, selfie_url, NULL::text AS license_url, NULL::text AS union_doc_url,
-       extra_doc_url, NULL::text AS qr_general_url, NULL::text AS qr_primaria_url,
-       NULL::text AS qr_secundaria_url, NULL::text AS qr_adulto_url,
+       extra_doc_url, qr_general_url, qr_primaria_url, qr_secundaria_url, qr_adulto_url,
        rejection_reason, resubmission_count, created_at
 FROM public.passengers
 UNION ALL
@@ -154,7 +209,9 @@ SELECT id, 'driver', status, first_name, paternal_surname, maternal_surname,
        NULL, NULL, NULL, NULL, NULL, rejection_reason, resubmission_count, created_at
 FROM public.drivers
 UNION ALL
-SELECT id, role::text::public.app_role, 'active'::public.user_status, first_name, paternal_surname, NULL,
+SELECT id, role::text::public.app_role,
+       CASE WHEN status = 'suspended' THEN 'suspended'::public.user_status ELSE 'active'::public.user_status END,
+       first_name, paternal_surname, NULL,
        NULL, NULL, phone, email, NULL, NULL, NULL, NULL, NULL, 0,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, created_at
 FROM public.admins_supervisors;
@@ -168,9 +225,12 @@ BEGIN
     UPDATE public.passengers SET status = NEW.status, first_name = NEW.first_name,
       paternal_surname = NEW.paternal_surname, maternal_surname = NEW.maternal_surname,
       ci_number = NEW.ci_number, birthdate = NEW.birthdate, phone = NEW.phone,
-      fare_category = coalesce(NEW.category, 'general'), balance = NEW.balance,
+      fare_category = coalesce(NEW.category, 'general'), bank_name = NEW.bank_name,
+      bank_account = NEW.bank_account, balance = NEW.balance,
       ci_front_url = NEW.ci_front_url, ci_back_url = NEW.ci_back_url, selfie_url = NEW.selfie_url,
-      extra_doc_url = NEW.extra_doc_url, rejection_reason = NEW.rejection_reason,
+      extra_doc_url = NEW.extra_doc_url, qr_general_url = NEW.qr_general_url,
+      qr_primaria_url = NEW.qr_primaria_url, qr_secundaria_url = NEW.qr_secundaria_url,
+      qr_adulto_url = NEW.qr_adulto_url, rejection_reason = NEW.rejection_reason,
       resubmission_count = NEW.resubmission_count
     WHERE id = OLD.id;
   ELSIF OLD.role = 'driver' THEN
