@@ -9,7 +9,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { QrCode, Bus, UserPlus, LogIn, Loader2 } from "lucide-react";
 import { useSession } from "@/hooks/use-session";
-import { seedAccounts } from "@/lib/auth.functions";
 import { PassengerRegister } from "@/components/registration/PassengerRegister";
 import { DriverRegister } from "@/components/registration/DriverRegister";
 
@@ -21,12 +20,6 @@ export const Route = createFileRoute("/")({
 function LoginPage() {
   const navigate = useNavigate();
   const { profile, userId, loading, missingProfile } = useSession();
-  const [seeded, setSeeded] = useState(false);
-
-  useEffect(() => {
-    if (seeded) return;
-    seedAccounts().then(() => setSeeded(true)).catch(() => setSeeded(true));
-  }, [seeded]);
 
   useEffect(() => {
     if (loading || !userId) return;
@@ -50,19 +43,33 @@ function LoginPage() {
             <span className="font-bold text-primary">QR Pago Justo</span>
           </div>
           <h1 className="text-2xl font-bold mt-4">Transporte Público Bolivia</h1>
-          <p className="text-sm text-muted-foreground mt-1">Pago justo con validación instantánea</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Pago justo con validación instantánea
+          </p>
         </div>
 
         <Card className="p-4 sm:p-6 max-w-full overflow-hidden">
           <Tabs defaultValue="login">
             <TabsList className="grid grid-cols-3 w-full">
-              <TabsTrigger value="login"><LogIn className="w-4 h-4 mr-1" /> Ingresar</TabsTrigger>
-              <TabsTrigger value="passenger"><UserPlus className="w-4 h-4 mr-1" /> Pasajero</TabsTrigger>
-              <TabsTrigger value="driver"><Bus className="w-4 h-4 mr-1" /> Chofer</TabsTrigger>
+              <TabsTrigger value="login">
+                <LogIn className="w-4 h-4 mr-1" /> Ingresar
+              </TabsTrigger>
+              <TabsTrigger value="passenger">
+                <UserPlus className="w-4 h-4 mr-1" /> Pasajero
+              </TabsTrigger>
+              <TabsTrigger value="driver">
+                <Bus className="w-4 h-4 mr-1" /> Chofer
+              </TabsTrigger>
             </TabsList>
-            <TabsContent value="login" className="mt-4"><LoginForm /></TabsContent>
-            <TabsContent value="passenger" className="mt-4"><PassengerRegister /></TabsContent>
-            <TabsContent value="driver" className="mt-4"><DriverRegister /></TabsContent>
+            <TabsContent value="login" className="mt-4">
+              <LoginForm />
+            </TabsContent>
+            <TabsContent value="passenger" className="mt-4">
+              <PassengerRegister />
+            </TabsContent>
+            <TabsContent value="driver" className="mt-4">
+              <DriverRegister />
+            </TabsContent>
           </Tabs>
         </Card>
       </div>
@@ -100,11 +107,21 @@ function LoginForm() {
     <form onSubmit={onSubmit} className="space-y-4">
       <div>
         <Label>Correo electrónico o teléfono</Label>
-        <Input value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="tu@correo.com o 70000000" required />
+        <Input
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
+          placeholder="tu@correo.com o 70000000"
+          required
+        />
       </div>
       <div>
         <Label>Contraseña</Label>
-        <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <Input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
       </div>
       <Button type="submit" disabled={busy} className="w-full">
         {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Iniciar Sesión

@@ -6,7 +6,7 @@ import { getSignedUrl } from "@/lib/image";
 import { STATUS_LABELS, isActiveStatus, isBlockedStatus, type Category } from "@/lib/categories";
 import { ResubmitDocs, PASSENGER_DOCS } from "@/components/ResubmitDocs";
 import { useTarifas } from "@/lib/tarifas";
-import { cleanAccount, getCoords, payFare, topUp as bankTopUp } from "@/lib/bank";
+import { cleanAccount, getCoords, payFare } from "@/lib/bank";
 
 import { playSuccessChime } from "@/lib/sound";
 import { QrScanner } from "@/components/QrScanner";
@@ -104,11 +104,25 @@ function PassengerPage() {
     if (!Number.isFinite(amount) || amount <= 0) return toast.error("Monto inválido");
     setTopupBusy(true);
     try {
-      const { error } = await supabase.rpc("topup_wallet", { _amount: amount, _method: "qr" });
-      if (error) throw error;
-      if (profile?.bank_account) {
-        try { await bankTopUp(cleanAccount(profile.bank_account), amount, profile.bank_name); } catch { /* API bancaria offline */ }
+      const { data, error } = await supabase.functions.invoke("bank-topup", {
+        body: { amount },
+      });
+
+      if (error) {
+        let message = error.message;
+        const context = "context" in error ? error.context : null;
+        if (context instanceof Response) {
+          try {
+            const payload = (await context.json()) as { error?: string };
+            message = payload.error || message;
+          } catch {
+            // Keep the SDK error when the response is not JSON.
+          }
+        }
+        throw new Error(message);
       }
+      if (!data?.ok) throw new Error(data?.error || "El banco no confirmó la recarga");
+
       await refresh();
       playSuccessChime();
       toast.success(`Saldo cargado: Bs ${amount.toFixed(2)}`);
