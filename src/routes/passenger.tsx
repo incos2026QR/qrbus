@@ -157,24 +157,27 @@ function PassengerPage() {
     setTopupBusy(true);
     try {
       // 1. Débita los fondos de la cuenta en la API del Banco en Render
-      // ✅ Correcto:
       await banco.recargar(account, amount);
 
-      // 2. Acredita el saldo en la billetera de Supabase
+      // 2. Acredita el saldo en la billetera de Supabase via RPC
       const { error } = await supabase.rpc("topup_wallet", { _amount: amount });
       if (error) throw error;
 
+      // 3. Refresca la sesión global y el estado
       await refresh();
+
       playSuccessChime();
       toast.success(`Saldo cargado: Bs ${amount.toFixed(2)}`);
       setTopupOpen(false);
+
+      // 4. Forzamos recarga de estado local si el hook no lo sincroniza al instante
+      window.location.reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error al cargar saldo");
     } finally {
       setTopupBusy(false);
     }
   }
-
   async function confirmPayment() {
     if (!driver || !profile) return;
     setBusy(true);
