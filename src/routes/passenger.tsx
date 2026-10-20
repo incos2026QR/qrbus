@@ -151,28 +151,33 @@ function PassengerPage() {
     const amount = Number(topupAmount);
     if (!Number.isFinite(amount) || amount <= 0) return toast.error("Monto inválido");
 
-    const account = cleanAccount(profile?.bank_account ?? "");
+    // Limpiamos la cuenta eliminando prefijos "CTA-" o espacios para el envío
+    const rawAccount = profile?.bank_account ?? "";
+    const account = cleanAccount(rawAccount);
+
     if (!account) return toast.error("No tienes una cuenta bancaria registrada para recargar");
 
     setTopupBusy(true);
     try {
-      // 1. Débita los fondos de la cuenta en la API del Banco en Render
+      // 1. Débito en la API del Banco en Render
       await banco.recargar(account, amount);
 
-      // 2. Acredita el saldo en la billetera de Supabase via RPC
-      const { error } = await supabase.rpc("topup_wallet", { _amount: amount });
-      if (error) throw error;
+      // 2. Acreditación de saldo en Supabase
+      const { data, error } = await supabase.rpc("topup_wallet", { _amount: amount });
 
-      // 3. Refresca la sesión global y el estado
+      if (error) {
+        console.error("Error RPC topup_wallet:", error);
+        throw new Error(`Error en Supabase: ${error.message}`);
+      }
+
+      // 3. Refrescar estado global de React sin recargar el navegador
       await refresh();
 
       playSuccessChime();
       toast.success(`Saldo cargado: Bs ${amount.toFixed(2)}`);
       setTopupOpen(false);
-
-      // 4. Forzamos recarga de estado local si el hook no lo sincroniza al instante
-      window.location.reload();
     } catch (e) {
+      console.error("Error en doTopup:", e);
       toast.error(e instanceof Error ? e.message : "Error al cargar saldo");
     } finally {
       setTopupBusy(false);
