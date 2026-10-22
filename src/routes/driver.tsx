@@ -14,13 +14,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   LogOut,
@@ -41,10 +34,8 @@ import { isBluetoothSupported, linkHardware, sendPaymentOk } from "@/lib/bluetoo
 import { cleanAccount, formatAccount } from "@/lib/bank";
 import { STATUS_LABELS, isActiveStatus, isBlockedStatus } from "@/lib/categories";
 import { ResubmitDocs, DRIVER_DOCS } from "@/components/ResubmitDocs";
-import { AdaptadorTrufi } from "@/lib/bank/trufi-adapter";
 import QRCode from "qrcode";
 
-const banco = new AdaptadorTrufi();
 export const Route = createFileRoute("/driver")({ ssr: false, component: DriverPage });
 
 type Tx = {
@@ -68,8 +59,9 @@ function DriverPage() {
   // Withdraw modal
   const [wOpen, setWOpen] = useState(false);
   const [wAmount, setWAmount] = useState("");
-  const [wDest, setWDest] = useState("");
   const [wBusy, setWBusy] = useState(false);
+  const [withdrawalPending, setWithdrawalPending] = useState(false);
+  const [withdrawalStatusLoading, setWithdrawalStatusLoading] = useState(true);
 
   // Bluetooth hardware link
   const [btName, setBtName] = useState<string | null>(null);
@@ -142,6 +134,27 @@ function DriverPage() {
   }, [profile?.driver_code]);
 
   useEffect(() => {
+    if (!userId || profile?.role !== "driver") return;
+    let cancelled = false;
+
+    async function loadWithdrawalStatus() {
+      setWithdrawalStatusLoading(true);
+      const { data, error } = await supabase.functions.invoke("bank-withdraw", {
+        body: { action: "status" },
+      });
+      if (!cancelled) {
+        if (!error) setWithdrawalPending(Boolean((data as { pending?: boolean })?.pending));
+        setWithdrawalStatusLoading(false);
+      }
+    }
+
+    void loadWithdrawalStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, profile?.role]);
+
+  useEffect(() => {
     if (!userId) return;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -186,26 +199,55 @@ function DriverPage() {
 
   async function doWithdraw() {
     const amount = Number(wAmount);
-    if (!Number.isFinite(amount) || amount <= 0) return toast.error("Monto inválido");
-    if (!wDest.trim()) return toast.error("Selecciona tu cuenta bancaria registrada");
+    const balance = Number(profile?.balance ?? 0);
+    const account = cleanAccount(profile?.bank_account ?? "");
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1000) {
+      return toast.error("Ingresa un monto válido de hasta Bs 1.000");
+    }
+    if (amount > balance) return toast.error("Saldo insuficiente");
+    if (!account) return toast.error("No tienes una cuenta bancaria registrada");
+    if (withdrawalPending) return toast.error("Ya tienes un retiro en revisión");
+
     setWBusy(true);
     try {
-      // 1. Procesa el retiro en la base de datos local (Supabase)
-      const { error } = await supabase.rpc("withdraw_earnings", {
-        _amount: amount,
-        _destination: wDest.trim(),
+      const { data, error } = await supabase.functions.invoke("bank-withdraw", {
+        body: { amount },
       });
-      if (error) throw error;
 
-      // 2. ⚡ DEPOSITA EL DINERO REAL EN LA API DEL BANCO ⚡
-      await banco.retirarGanancias(wDest.trim(), amount);
+      if (error) {
+        let message = error.message;
+        let reconciliationRequired = false;
+        const response = (error as { context?: Response }).context;
+        if (response) {
+          try {
+            const body = (await response.json()) as {
+              error?: string;
+              reconciliationRequired?: boolean;
+            };
+            if (body.error) message = body.error;
+            reconciliationRequired = Boolean(body.reconciliationRequired);
+          } catch {
+            // Conserva el mensaje original cuando la respuesta no sea JSON.
+          }
+        }
+        if (reconciliationRequired) setWithdrawalPending(true);
+        throw new Error(message);
+      }
+
+      const result = data as {
+        ok?: boolean;
+        walletBalance?: number;
+        bankBalance?: number | null;
+        error?: string;
+      } | null;
+      if (!result?.ok) throw new Error(result?.error || "No se pudo completar el retiro");
 
       await refresh();
+      setWithdrawalPending(false);
       playSuccessChime();
-      toast.success(`Retiro de Bs ${amount.toFixed(2)} enviado a ${wDest.trim()}`);
+      toast.success(`Retiro de Bs ${amount.toFixed(2)} enviado a ${formatAccount(profile?.bank_name, account)}`);
       setWOpen(false);
       setWAmount("");
-      setWDest("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error al retirar");
     } finally {
@@ -360,18 +402,25 @@ function DriverPage() {
           {/* Retirar ganancias */}
           <Dialog
             open={wOpen}
-            onOpenChange={(o) => {
-              setWOpen(o);
-              if (o && account) setWDest(account);
-            }}
+            onOpenChange={setWOpen}
           >
             <DialogTrigger asChild>
               <Button
                 size="icon"
                 variant="ghost"
                 aria-label="Retirar ganancias"
-                title="Retirar ganancias"
-                disabled={balance <= 0}
+                title={
+                  withdrawalPending
+                    ? "Retiro en revisión"
+                    : !account
+                      ? "Registra una cuenta bancaria para retirar"
+                      : balance <= 0
+                        ? "No tienes saldo disponible"
+                        : "Retirar ganancias"
+                }
+                disabled={
+                  balance <= 0 || !account || withdrawalPending || withdrawalStatusLoading
+                }
               >
                 <Banknote className="w-5 h-5" />
               </Button>
@@ -404,23 +453,26 @@ function DriverPage() {
                 <div>
                   <Label>Cuenta bancaria registrada</Label>
                   {account ? (
-                    <Select value={wDest || account} onValueChange={setWDest}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona tu cuenta" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={account}>
-                          {formatAccount(profile.bank_name, account)}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                      {formatAccount(profile.bank_name, account)}
+                    </p>
                   ) : (
                     <p className="text-sm text-destructive">
                       No tienes una cuenta bancaria registrada.
                     </p>
                   )}
                 </div>
-                <Button className="w-full" onClick={doWithdraw} disabled={wBusy || !account}>
+                <Button
+                  className="w-full"
+                  onClick={doWithdraw}
+                  disabled={
+                    wBusy ||
+                    !account ||
+                    withdrawalPending ||
+                    Number(wAmount) <= 0 ||
+                    Number(wAmount) > Math.min(balance, 1000)
+                  }
+                >
                   {wBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Confirmar retiro
                 </Button>
               </div>
@@ -448,6 +500,12 @@ function DriverPage() {
           </Button>
         </div>
       </header>
+
+      {withdrawalPending && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          Tu retiro está en revisión. El saldo permanece reservado y no debes repetir la operación.
+        </div>
+      )}
 
       {/* 1. Última validación destacada */}
       {txs[0] && (

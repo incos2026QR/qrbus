@@ -6,7 +6,7 @@ import { getSignedUrl } from "@/lib/image";
 import { STATUS_LABELS, isActiveStatus, isBlockedStatus, type Category } from "@/lib/categories";
 import { ResubmitDocs, PASSENGER_DOCS } from "@/components/ResubmitDocs";
 import { useTarifas } from "@/lib/tarifas";
-import { cleanAccount, getCoords, payFare } from "@/lib/bank";
+import { getCoords } from "@/lib/bank";
 
 import { playSuccessChime } from "@/lib/sound";
 import { QrScanner } from "@/components/QrScanner";
@@ -45,10 +45,6 @@ import {
   Users,
 } from "lucide-react";
 import QRCode from "qrcode";
-import { AdaptadorTrufi } from "@/lib/bank/trufi-adapter";
-
-const banco = new AdaptadorTrufi();
-
 const CATEGORY_OPTIONS: Category[] = [
   "general",
   "primaria",
@@ -149,32 +145,50 @@ function PassengerPage() {
 
   async function doTopup() {
     const amount = Number(topupAmount);
-    if (!Number.isFinite(amount) || amount <= 0) return toast.error("Monto inválido");
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1000) {
+      return toast.error("Ingresa un monto válido de hasta Bs 1.000");
+    }
 
-    // Limpiamos la cuenta eliminando prefijos "CTA-" o espacios para el envío
-    const rawAccount = profile?.bank_account ?? "";
-    const account = cleanAccount(rawAccount);
-
-    if (!account) return toast.error("No tienes una cuenta bancaria registrada para recargar");
+    if (!profile?.bank_account) {
+      return toast.error("No tienes una cuenta bancaria registrada para recargar");
+    }
 
     setTopupBusy(true);
     try {
-      // 1. Débito en la API del Banco en Render
-      await banco.recargar(account, amount);
-
-      // 2. Acreditación de saldo en Supabase
-      const { data, error } = await supabase.rpc("topup_wallet", { _amount: amount });
+      // El servidor registra la solicitud, debita el banco y acredita la billetera
+      // en ese orden. El navegador nunca debe acreditar saldo directamente.
+      const { data, error } = await supabase.functions.invoke("bank-topup", {
+        body: { amount },
+      });
 
       if (error) {
-        console.error("Error RPC topup_wallet:", error);
-        throw new Error(`Error en Supabase: ${error.message}`);
+        let message = error.message;
+        const response = (error as { context?: Response }).context;
+
+        if (response) {
+          try {
+            const body = (await response.json()) as { error?: string };
+            if (body.error) message = body.error;
+          } catch {
+            // Conserva el mensaje original cuando la respuesta no sea JSON.
+          }
+        }
+
+        throw new Error(message);
       }
 
-      // 3. Refrescar estado global de React sin recargar el navegador
+      const result = data as {
+        ok?: boolean;
+        walletBalance?: number;
+        bankBalance?: number;
+        error?: string;
+      } | null;
+      if (!result?.ok) throw new Error(result?.error || "No se pudo completar la recarga");
+
       await refresh();
 
       playSuccessChime();
-      toast.success(`Saldo cargado: Bs ${amount.toFixed(2)}`);
+      toast.success(`Saldo cargado. Nuevo saldo: Bs ${Number(result.walletBalance).toFixed(2)}`);
       setTopupOpen(false);
     } catch (e) {
       console.error("Error en doTopup:", e);
@@ -198,26 +212,6 @@ function PassengerPage() {
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) throw new Error("No se pudo procesar el pago");
-
-      // Cobro en la API bancaria simulada
-      if (profile.bank_account && driver.bank_account) {
-        try {
-          await payFare(
-            {
-              cuentaOrigen: cleanAccount(profile.bank_account),
-              cuentaDestino: cleanAccount(driver.bank_account),
-              monto: Number(row.total),
-              tarifaTipo: nombre((row.category as Category) ?? "general"),
-              cantidadPasajes: tickets,
-              latitud: coords.latitud,
-              longitud: coords.longitud,
-            },
-            profile.bank_name,
-          );
-        } catch (apiErr) {
-          toast.warning(apiErr instanceof Error ? apiErr.message : "El banco no respondió");
-        }
-      }
 
       const selfie = profile.selfie_url
         ? await getSignedUrl(supabase, "kyc-documents", profile.selfie_url)

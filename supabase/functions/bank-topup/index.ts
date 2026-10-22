@@ -16,14 +16,29 @@ function json(body: Record<string, unknown>, status = 200) {
 }
 
 function getPublishableKey() {
+  const keys = Deno.env.get("SUPABASE_PUBLISHABLE_KEYS");
+  if (keys) {
+    const parsed = JSON.parse(keys) as Record<string, string>;
+    if (parsed.default) return parsed.default;
+  }
+
   const legacyKey = Deno.env.get("SUPABASE_ANON_KEY");
   if (legacyKey) return legacyKey;
 
-  const keys = Deno.env.get("SUPABASE_PUBLISHABLE_KEYS");
-  if (!keys) throw new Error("Supabase publishable key is not configured");
-  const parsed = JSON.parse(keys) as Record<string, string>;
-  if (!parsed.default) throw new Error("Default Supabase publishable key is not configured");
-  return parsed.default;
+  throw new Error("Supabase publishable key is not configured");
+}
+
+function getSecretKey() {
+  const keys = Deno.env.get("SUPABASE_SECRET_KEYS");
+  if (keys) {
+    const parsed = JSON.parse(keys) as Record<string, string>;
+    if (parsed.default) return parsed.default;
+  }
+
+  const legacyKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (legacyKey) return legacyKey;
+
+  throw new Error("Supabase secret key is not configured");
 }
 
 Deno.serve(async (request) => {
@@ -40,14 +55,13 @@ Deno.serve(async (request) => {
     if (!authorization?.startsWith("Bearer ")) return json({ error: "No autenticado" }, 401);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceRoleKey) throw new Error("Supabase server credentials are missing");
+    if (!supabaseUrl) throw new Error("Supabase server URL is missing");
 
     const userClient = createClient(supabaseUrl, getPublishableKey(), {
       global: { headers: { Authorization: authorization } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    admin = createClient(supabaseUrl, serviceRoleKey, {
+    admin = createClient(supabaseUrl, getSecretKey(), {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
