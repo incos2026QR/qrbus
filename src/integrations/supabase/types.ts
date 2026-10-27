@@ -10,37 +10,84 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.18"
   }
   public: {
     Tables: {
-      profiles: {
+      admins_supervisors: {
+        Row: {
+          created_at: string
+          email: string | null
+          first_name: string | null
+          id: string
+          paternal_surname: string | null
+          phone: string | null
+          role: Database["public"]["Enums"]["staff_role"]
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          first_name?: string | null
+          id: string
+          paternal_surname?: string | null
+          phone?: string | null
+          role?: Database["public"]["Enums"]["staff_role"]
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          first_name?: string | null
+          id?: string
+          paternal_surname?: string | null
+          phone?: string | null
+          role?: Database["public"]["Enums"]["staff_role"]
+          status?: string
+        }
+        Relationships: []
+      }
+      bancos: {
+        Row: {
+          codigo: string
+          created_at: string | null
+          id: string
+          nombre: string
+        }
+        Insert: {
+          codigo: string
+          created_at?: string | null
+          id?: string
+          nombre: string
+        }
+        Update: {
+          codigo?: string
+          created_at?: string | null
+          id?: string
+          nombre?: string
+        }
+        Relationships: []
+      }
+      drivers: {
         Row: {
           balance: number
           bank_account: string | null
           bank_name: string | null
           birthdate: string | null
-          category: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url: string | null
           ci_front_url: string | null
           ci_number: string | null
           created_at: string
           driver_code: string | null
           email: string | null
-          extra_doc_url: string | null
           first_name: string | null
           id: string
           license_url: string | null
           maternal_surname: string | null
           paternal_surname: string | null
           phone: string | null
-          qr_adulto_url: string | null
-          qr_general_url: string | null
-          qr_primaria_url: string | null
-          qr_secundaria_url: string | null
           rejection_reason: string | null
           resubmission_count: number
-          role: Database["public"]["Enums"]["app_role"]
           selfie_url: string | null
           status: Database["public"]["Enums"]["user_status"]
           transport_line: string | null
@@ -51,27 +98,20 @@ export type Database = {
           bank_account?: string | null
           bank_name?: string | null
           birthdate?: string | null
-          category?: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url?: string | null
           ci_front_url?: string | null
           ci_number?: string | null
           created_at?: string
           driver_code?: string | null
           email?: string | null
-          extra_doc_url?: string | null
           first_name?: string | null
           id: string
           license_url?: string | null
           maternal_surname?: string | null
           paternal_surname?: string | null
           phone?: string | null
-          qr_adulto_url?: string | null
-          qr_general_url?: string | null
-          qr_primaria_url?: string | null
-          qr_secundaria_url?: string | null
           rejection_reason?: string | null
           resubmission_count?: number
-          role?: Database["public"]["Enums"]["app_role"]
           selfie_url?: string | null
           status?: Database["public"]["Enums"]["user_status"]
           transport_line?: string | null
@@ -82,31 +122,117 @@ export type Database = {
           bank_account?: string | null
           bank_name?: string | null
           birthdate?: string | null
-          category?: Database["public"]["Enums"]["fare_category"] | null
           ci_back_url?: string | null
           ci_front_url?: string | null
           ci_number?: string | null
           created_at?: string
           driver_code?: string | null
           email?: string | null
-          extra_doc_url?: string | null
           first_name?: string | null
           id?: string
           license_url?: string | null
           maternal_surname?: string | null
           paternal_surname?: string | null
           phone?: string | null
-          qr_adulto_url?: string | null
-          qr_general_url?: string | null
-          qr_primaria_url?: string | null
-          qr_secundaria_url?: string | null
           rejection_reason?: string | null
           resubmission_count?: number
-          role?: Database["public"]["Enums"]["app_role"]
           selfie_url?: string | null
           status?: Database["public"]["Enums"]["user_status"]
           transport_line?: string | null
           union_doc_url?: string | null
+        }
+        Relationships: []
+      }
+      lineas_transporte: {
+        Row: {
+          activa: boolean | null
+          codigo: string
+          created_at: string | null
+          id: string
+          nombre: string
+        }
+        Insert: {
+          activa?: boolean | null
+          codigo: string
+          created_at?: string | null
+          id?: string
+          nombre: string
+        }
+        Update: {
+          activa?: boolean | null
+          codigo?: string
+          created_at?: string | null
+          id?: string
+          nombre?: string
+        }
+        Relationships: []
+      }
+      passengers: {
+        Row: {
+          balance: number
+          bank_account: string | null
+          bank_name: string | null
+          birthdate: string | null
+          ci_back_url: string | null
+          ci_front_url: string | null
+          ci_number: string | null
+          created_at: string
+          email: string | null
+          extra_doc_url: string | null
+          fare_category: Database["public"]["Enums"]["fare_category"]
+          first_name: string | null
+          id: string
+          maternal_surname: string | null
+          paternal_surname: string | null
+          phone: string | null
+          rejection_reason: string | null
+          resubmission_count: number
+          selfie_url: string | null
+          status: Database["public"]["Enums"]["user_status"]
+        }
+        Insert: {
+          balance?: number
+          bank_account?: string | null
+          bank_name?: string | null
+          birthdate?: string | null
+          ci_back_url?: string | null
+          ci_front_url?: string | null
+          ci_number?: string | null
+          created_at?: string
+          email?: string | null
+          extra_doc_url?: string | null
+          fare_category?: Database["public"]["Enums"]["fare_category"]
+          first_name?: string | null
+          id: string
+          maternal_surname?: string | null
+          paternal_surname?: string | null
+          phone?: string | null
+          rejection_reason?: string | null
+          resubmission_count?: number
+          selfie_url?: string | null
+          status?: Database["public"]["Enums"]["user_status"]
+        }
+        Update: {
+          balance?: number
+          bank_account?: string | null
+          bank_name?: string | null
+          birthdate?: string | null
+          ci_back_url?: string | null
+          ci_front_url?: string | null
+          ci_number?: string | null
+          created_at?: string
+          email?: string | null
+          extra_doc_url?: string | null
+          fare_category?: Database["public"]["Enums"]["fare_category"]
+          first_name?: string | null
+          id?: string
+          maternal_surname?: string | null
+          paternal_surname?: string | null
+          phone?: string | null
+          rejection_reason?: string | null
+          resubmission_count?: number
+          selfie_url?: string | null
+          status?: Database["public"]["Enums"]["user_status"]
         }
         Relationships: []
       }
@@ -242,6 +368,45 @@ export type Database = {
         }
         Relationships: []
       }
+      wallet_topup_requests: {
+        Row: {
+          amount: number
+          bank_account: string
+          bank_balance_after: number | null
+          created_at: string
+          error_message: string | null
+          id: string
+          status: string
+          updated_at: string
+          user_id: string
+          wallet_balance_after: number | null
+        }
+        Insert: {
+          amount: number
+          bank_account: string
+          bank_balance_after?: number | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+          wallet_balance_after?: number | null
+        }
+        Update: {
+          amount?: number
+          bank_account?: string
+          bank_balance_after?: number | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+          wallet_balance_after?: number | null
+        }
+        Relationships: []
+      }
       wallet_topups: {
         Row: {
           amount: number
@@ -266,6 +431,45 @@ export type Database = {
         }
         Relationships: []
       }
+      wallet_withdrawal_requests: {
+        Row: {
+          amount: number
+          bank_account: string
+          bank_balance_after: number | null
+          created_at: string
+          driver_id: string
+          error_message: string | null
+          id: string
+          status: string
+          updated_at: string
+          wallet_balance_after: number | null
+        }
+        Insert: {
+          amount: number
+          bank_account: string
+          bank_balance_after?: number | null
+          created_at?: string
+          driver_id: string
+          error_message?: string | null
+          id: string
+          status?: string
+          updated_at?: string
+          wallet_balance_after?: number | null
+        }
+        Update: {
+          amount?: number
+          bank_account?: string
+          bank_balance_after?: number | null
+          created_at?: string
+          driver_id?: string
+          error_message?: string | null
+          id?: string
+          status?: string
+          updated_at?: string
+          wallet_balance_after?: number | null
+        }
+        Relationships: []
+      }
       withdrawals: {
         Row: {
           amount: number
@@ -273,6 +477,7 @@ export type Database = {
           destination: string
           driver_id: string
           id: string
+          request_id: string | null
           status: string
         }
         Insert: {
@@ -281,6 +486,7 @@ export type Database = {
           destination: string
           driver_id: string
           id?: string
+          request_id?: string | null
           status?: string
         }
         Update: {
@@ -289,19 +495,66 @@ export type Database = {
           destination?: string
           driver_id?: string
           id?: string
+          request_id?: string | null
           status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "withdrawals_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "wallet_withdrawal_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+    }
+    Views: {
+      profiles: {
+        Row: {
+          balance: number | null
+          bank_account: string | null
+          bank_name: string | null
+          birthdate: string | null
+          category: Database["public"]["Enums"]["fare_category"] | null
+          ci_back_url: string | null
+          ci_front_url: string | null
+          ci_number: string | null
+          created_at: string | null
+          driver_code: string | null
+          email: string | null
+          extra_doc_url: string | null
+          first_name: string | null
+          id: string | null
+          license_url: string | null
+          maternal_surname: string | null
+          paternal_surname: string | null
+          phone: string | null
+          qr_adulto_url: string | null
+          qr_general_url: string | null
+          qr_primaria_url: string | null
+          qr_secundaria_url: string | null
+          rejection_reason: string | null
+          resubmission_count: number | null
+          role: Database["public"]["Enums"]["app_role"] | null
+          selfie_url: string | null
+          status: Database["public"]["Enums"]["user_status"] | null
+          transport_line: string | null
+          union_doc_url: string | null
         }
         Relationships: []
       }
     }
-    Views: {
-      [_ in never]: never
-    }
     Functions: {
+      complete_bank_withdrawal: {
+        Args: { _request_id: string }
+        Returns: number
+      }
       fare_for_category: {
         Args: { _c: Database["public"]["Enums"]["fare_category"] }
         Returns: number
       }
+      finalize_bank_topup: { Args: { _request_id: string }; Returns: number }
       find_driver_by_code: {
         Args: { _code: string }
         Returns: {
@@ -319,35 +572,33 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_staff: { Args: { _uid: string }; Returns: boolean }
       lookup_email_by_phone: { Args: { _phone: string }; Returns: string }
-      pay_fare:
-        | {
-            Args: { _driver_code: string; _tickets: number }
-            Returns: {
-              base_amount: number
-              category: Database["public"]["Enums"]["fare_category"]
-              extra_amount: number
-              new_balance: number
-              total: number
-              verification_code: string
-            }[]
-          }
-        | {
-            Args: {
-              _driver_code: string
-              _lat?: number
-              _lng?: number
-              _tickets: number
-            }
-            Returns: {
-              base_amount: number
-              category: Database["public"]["Enums"]["fare_category"]
-              extra_amount: number
-              new_balance: number
-              total: number
-              verification_code: string
-            }[]
-          }
+      mark_bank_withdrawal_credited: {
+        Args: { _bank_balance_after: number; _request_id: string }
+        Returns: undefined
+      }
+      mark_bank_withdrawal_reconciliation: {
+        Args: { _error_message: string; _request_id: string }
+        Returns: undefined
+      }
+      new_driver_code: { Args: never; Returns: string }
+      pay_fare: {
+        Args: {
+          _driver_code: string
+          _lat?: number
+          _lng?: number
+          _tickets: number
+        }
+        Returns: {
+          base_amount: number
+          category: Database["public"]["Enums"]["fare_category"]
+          extra_amount: number
+          new_balance: number
+          total: number
+          verification_code: string
+        }[]
+      }
       pay_fare_group: {
         Args: {
           _companions?: Database["public"]["Enums"]["fare_category"][]
@@ -365,10 +616,19 @@ export type Database = {
           verification_code: string
         }[]
       }
-      topup_wallet: {
-        Args: { _amount: number; _method?: string }
+      refund_bank_withdrawal: {
+        Args: { _error_message: string; _request_id: string }
         Returns: number
       }
+      reserve_bank_withdrawal: {
+        Args: { _amount: number; _driver_id: string; _request_id: string }
+        Returns: {
+          bank_account: string
+          wallet_balance: number
+        }[]
+      }
+      safe_profile_date: { Args: { _value: string }; Returns: string }
+      topup_wallet: { Args: { _amount: number }; Returns: Json }
       withdraw_earnings: {
         Args: { _amount: number; _destination: string }
         Returns: number
@@ -382,6 +642,7 @@ export type Database = {
         | "secundaria"
         | "adulto_mayor"
         | "discapacidad"
+      staff_role: "admin" | "supervisor"
       user_status: "pending" | "active" | "rejected" | "suspended"
     }
     CompositeTypes: {
@@ -518,6 +779,7 @@ export const Constants = {
         "adulto_mayor",
         "discapacidad",
       ],
+      staff_role: ["admin", "supervisor"],
       user_status: ["pending", "active", "rejected", "suspended"],
     },
   },

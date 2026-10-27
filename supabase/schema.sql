@@ -252,7 +252,14 @@ CREATE TRIGGER trg_tarifas_updated_at BEFORE UPDATE ON public.tarifas
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fare_for_category(_c public.fare_category)
 RETURNS numeric LANGUAGE sql STABLE SET search_path = public AS $$
-  SELECT coalesce((SELECT precio FROM public.tarifas WHERE tipo = _c::text), 2.0)::numeric
+  SELECT coalesce(
+    (SELECT precio FROM public.tarifas
+     WHERE tipo = CASE _c
+       WHEN 'secundaria'::public.fare_category THEN 'universitario'
+       ELSE _c::text
+     END),
+    2.0
+  )::numeric
 $$;
 
 CREATE OR REPLACE FUNCTION public.lookup_email_by_phone(_phone text)

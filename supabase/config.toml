@@ -2,3 +2,6 @@ project_id = "sjqrgmvrpdykeisxtqqo"
 
 [functions.bank-topup]
 verify_jwt = true
+
+[functions.bank-withdraw]
+verify_jwt = true
