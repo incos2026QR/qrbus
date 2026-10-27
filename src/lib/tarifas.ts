@@ -4,14 +4,10 @@ import type { Category } from "./categories";
 
 export type Tarifa = { id: string; tipo: string; nombre: string; precio: number };
 
-/**
- * Equivalencia entre el valor del enum `fare_category` guardado en `profiles`
- * y el `tipo` de la fila correspondiente en `public.tarifas`.
- * No define tarifas: solo enlaza cada categoría con su fila en la base de datos.
- */
-export const CATEGORY_TIPO: Record<Category, string> = {
+/** Maps passenger categories to the existing types in `public.tarifas`. */
+const CATEGORY_TIPO: Record<Category, string> = {
   general: "general",
-  primaria: "estudiante",
+  primaria: "primaria",
   secundaria: "universitario",
   adulto_mayor: "adulto_mayor",
   discapacidad: "discapacidad",
@@ -32,10 +28,19 @@ export async function fetchTarifas(force = false) {
   if (cache && !force) return cache;
   if (inflight && !force) return inflight;
   inflight = (async () => {
-    const { data, error } = await supabase.from("tarifas").select("id, tipo, nombre, precio").order("precio");
-    if (error) { inflight = null; throw error; }
+    const { data, error } = await supabase
+      .from("tarifas")
+      .select("id, tipo, nombre, precio")
+      .order("precio");
+    if (error) {
+      inflight = null;
+      throw error;
+    }
     const list: Tarifa[] = (data ?? []).map((t) => ({
-      id: String(t.id), tipo: t.tipo, nombre: t.nombre, precio: Number(t.precio),
+      id: String(t.id),
+      tipo: t.tipo,
+      nombre: t.nombre,
+      precio: Number(t.precio),
     }));
     const byTipo: MapaTarifas = {};
     for (const t of list) byTipo[t.tipo] = t;
@@ -56,18 +61,29 @@ export function useTarifas() {
   useEffect(() => {
     let alive = true;
     fetchTarifas()
-      .then((m) => { if (alive) { setList(m.list); setByTipo(m.byTipo); setLoading(false); } })
+      .then((m) => {
+        if (alive) {
+          setList(m.list);
+          setByTipo(m.byTipo);
+          setLoading(false);
+        }
+      })
       .catch((e: unknown) => {
         if (!alive) return;
         setError(e instanceof Error ? e.message : "No se pudieron cargar las tarifas");
         setLoading(false);
       });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  const tarifaFor = (c: Category | string | null | undefined): Tarifa | undefined => byTipo[tipoForCategory(c)];
-  const precio = (c: Category | string | null | undefined): number => Number(tarifaFor(c)?.precio ?? 0);
-  const nombre = (c: Category | string | null | undefined): string => tarifaFor(c)?.nombre ?? String(c ?? "—");
+  const tarifaFor = (c: Category | string | null | undefined): Tarifa | undefined =>
+    byTipo[tipoForCategory(c)];
+  const precio = (c: Category | string | null | undefined): number =>
+    Number(tarifaFor(c)?.precio ?? 0);
+  const nombre = (c: Category | string | null | undefined): string =>
+    tarifaFor(c)?.nombre ?? String(c ?? "—");
 
   return { tarifas: list, byTipo, tarifaFor, precio, nombre, loading, error };
 }
