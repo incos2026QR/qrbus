@@ -83,7 +83,8 @@ function PassengerPage() {
   const [pass, setPass] = useState<{
     vcode: string;
     selfieUrl: string | null;
-    tickets: number;
+    total: number;
+    items: { category: string; amount: number; count: number }[];
   } | null>(null);
   const [history, setHistory] = useState<MyTx[]>([]);
   const [hideBalance, setHideBalance] = useState(true);
@@ -126,6 +127,15 @@ function PassengerPage() {
   const basePrice = precio(profile?.category ?? "general");
   const total = basePrice + companions.reduce((s, c) => s + precio(c), 0);
   const tickets = 1 + companions.length;
+  const companionSummary = companions.reduce<{ category: Category; count: number }[]>(
+    (summary, category) => {
+      const existing = summary.find((item) => item.category === category);
+      if (existing) existing.count += 1;
+      else summary.push({ category, count: 1 });
+      return summary;
+    },
+    [],
+  );
 
   async function findDriver(rawCode: string) {
     const clean = rawCode
@@ -213,11 +223,29 @@ function PassengerPage() {
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) throw new Error("No se pudo procesar el pago");
 
+      const passengerCategory = profile.category ?? "general";
+      const paidItems = [
+        {
+          category: nombre(passengerCategory),
+          amount: Number(row.base_amount),
+          count: 1,
+        },
+        ...companionSummary.map(({ category, count }) => ({
+          category: nombre(category),
+          amount: precio(category) * count,
+          count,
+        })),
+      ];
       const selfie = profile.selfie_url
         ? await getSignedUrl(supabase, "kyc-documents", profile.selfie_url)
         : null;
       playSuccessChime();
-      setPass({ vcode: row.verification_code, selfieUrl: selfie, tickets });
+      setPass({
+        vcode: row.verification_code,
+        selfieUrl: selfie,
+        total: Number(row.total),
+        items: paidItems,
+      });
       await refresh();
       loadHistory();
     } catch (e) {
@@ -275,7 +303,30 @@ function PassengerPage() {
             />
           )}
           <div className="mt-5 text-2xl font-bold">
-            {pass.tickets} Pasaje{pass.tickets > 1 ? "s" : ""} pagado{pass.tickets > 1 ? "s" : ""}
+            {pass.items.length} {pass.items.length === 1 ? "Pasaje pagado" : "Pasajes pagados"}
+          </div>
+          <div className="mt-3 rounded-md border p-3 text-left space-y-2">
+            <div className="flex justify-between gap-3 text-sm">
+              <span>{pass.items[0].category}</span>
+              <span className="shrink-0">Bs {pass.items[0].amount.toFixed(2)}</span>
+            </div>
+            {pass.items.length > 1 && (
+              <>
+                <p className="pt-1 text-xs font-semibold text-muted-foreground">Acompañantes</p>
+                {pass.items.slice(1).map((item) => (
+                  <div key={item.category} className="flex justify-between gap-3 text-sm">
+                    <span>
+                      {item.count} {item.category}
+                    </span>
+                    <span className="shrink-0">Bs {item.amount.toFixed(2)}</span>
+                  </div>
+                ))}
+              </>
+            )}
+            <div className="flex justify-between gap-3 border-t pt-2 font-bold">
+              <span>Total pagado</span>
+              <span className="shrink-0">Bs {pass.total.toFixed(2)}</span>
+            </div>
           </div>
           <p className="mt-4 text-sm text-muted-foreground">
             Muestra este código al chofer para validar el pago.
@@ -424,15 +475,22 @@ function PassengerPage() {
 
               <div className="mt-1 text-sm space-y-1">
                 <div className="flex justify-between">
-                  <span>1 {nombre(profile.category ?? "general")} (tú)</span>
+                  <span>{nombre(profile.category ?? "general")}</span>
                   <span>Bs {basePrice.toFixed(2)}</span>
                 </div>
-                {companions.map((c, i) => (
-                  <div key={i} className="flex justify-between">
-                    <span>1 {nombre(c)}</span>
-                    <span>Bs {precio(c).toFixed(2)}</span>
-                  </div>
-                ))}
+                {companionSummary.length > 0 && (
+                  <>
+                    <p className="pt-1 text-xs font-semibold text-muted-foreground">Acompañantes</p>
+                    {companionSummary.map(({ category, count }) => (
+                      <div key={category} className="flex justify-between">
+                        <span>
+                          {count} {nombre(category)}
+                        </span>
+                        <span>Bs {(precio(category) * count).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
                 <div className="flex justify-between font-bold border-t pt-1">
                   <span>
                     Total ({tickets} pasaje{tickets > 1 ? "s" : ""})
