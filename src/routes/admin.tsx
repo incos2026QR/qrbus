@@ -12,11 +12,11 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { LogOut, Users, Bus, Shield, BarChart3, CheckCircle2, XCircle, Ban, ArrowUp, Menu, Receipt, MapPin, Download } from "lucide-react";
+import { LogOut, Users, Bus, Shield, BarChart3, CheckCircle2, XCircle, Ban, Menu, Receipt, MapPin, Download } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cleanAccount, formatAccount } from "@/lib/bank";
 import * as XLSX from "xlsx";
-import { grantRole, createSupervisor } from "@/lib/auth.functions";
+import { createSupervisor } from "@/lib/auth.functions";
 import { STATUS_LABELS, ALL_CATEGORIES, type Category } from "@/lib/categories";
 import { useTarifas } from "@/lib/tarifas";
 import { useBancos } from "@/lib/catalogs";
@@ -92,7 +92,7 @@ function AdminPage() {
       <main className="flex-1 p-4 sm:p-6 bg-background overflow-auto max-w-full">
         {tab === "drivers" && <UserTable role="driver" onChange={refresh} />}
         {tab === "passengers" && <UserTable role="passenger" onChange={refresh} />}
-        {tab === "supervisors" && isAdmin && <UserTable role="supervisor" onChange={refresh} allowPromote={false} />}
+        {tab === "supervisors" && isAdmin && <UserTable role="supervisor" onChange={refresh} />}
         {tab === "transactions" && <TransactionsPanel />}
         {tab === "reports" && <ReportsPanel />}
       </main>
@@ -108,7 +108,7 @@ function NavBtn({ active, onClick, icon, children }: { active: boolean; onClick:
   );
 }
 
-function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "passenger" | "supervisor"; onChange: () => void; allowPromote?: boolean }) {
+function UserTable({ role, onChange }: { role: "driver" | "passenger" | "supervisor"; onChange: () => void }) {
   const isSupervisors = role === "supervisor";
   const [subtab, setSubtab] = useState<"pending" | "active">(isSupervisors ? "active" : "pending");
   const [rows, setRows] = useState<Profile[]>([]);
@@ -176,12 +176,6 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
     toast.success("Estado actualizado");
     setSelected(null);
     load(); onChange();
-  }
-
-  async function promoteToSupervisor(id: string) {
-    await grantRole({ data: { userId: id, role: "supervisor" } });
-    toast.success("Promovido a supervisor");
-    load();
   }
 
   return (
@@ -296,11 +290,6 @@ function UserTable({ role, onChange, allowPromote = true }: { role: "driver" | "
                 <Button variant="destructive" onClick={() => updateStatus(selected.id, "suspended")}>
                   <Ban className="w-4 h-4 mr-1" /> Suspender
                 </Button>
-                {allowPromote && (
-                  <Button variant="secondary" onClick={() => promoteToSupervisor(selected.id)}>
-                    <ArrowUp className="w-4 h-4 mr-1" /> Promover a Supervisor
-                  </Button>
-                )}
               </div>
             </div>
           )}
