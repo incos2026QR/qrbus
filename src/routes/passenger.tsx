@@ -136,6 +136,21 @@ function PassengerPage() {
     },
     [],
   );
+  const availableCompanionCategories = CATEGORY_OPTIONS.filter(
+    (category) => !companions.includes(category),
+  );
+
+  function addCompanion() {
+    setCompanions((current) => {
+      if (current.length >= 9) return current;
+      const preferredCategory = profile?.category ?? "general";
+      const category =
+        CATEGORY_OPTIONS.find(
+          (option) => option === preferredCategory && !current.includes(option),
+        ) ?? CATEGORY_OPTIONS.find((option) => !current.includes(option));
+      return category ? [...current, category] : current;
+    });
+  }
 
   async function findDriver(rawCode: string) {
     const clean = rawCode
@@ -432,19 +447,23 @@ function PassengerPage() {
                 <Users className="w-3 h-3" /> Pasajeros vinculados (acompañantes)
               </p>
 
-              {companions.map((c, i) => (
-                <div key={i} className="flex items-center gap-2">
+              {companionSummary.map(({ category, count }) => (
+                <div key={category} className="flex items-center gap-2">
                   <Select
-                    value={c}
+                    value={category}
                     onValueChange={(v) =>
-                      setCompanions((arr) => arr.map((x, j) => (j === i ? (v as Category) : x)))
+                      setCompanions((arr) =>
+                        arr.map((existing) => (existing === category ? (v as Category) : existing)),
+                      )
                     }
                   >
                     <SelectTrigger className="flex-1">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {CATEGORY_OPTIONS.map((opt) => (
+                      {CATEGORY_OPTIONS.filter(
+                        (option) => option === category || !companions.includes(option),
+                      ).map((opt) => (
                         <SelectItem key={opt} value={opt}>
                           {nombre(opt)} · Bs {precio(opt).toFixed(2)}
                         </SelectItem>
@@ -454,8 +473,27 @@ function PassengerPage() {
                   <Button
                     size="icon"
                     variant="outline"
-                    aria-label="Quitar acompañante"
-                    onClick={() => setCompanions((arr) => arr.filter((_, j) => j !== i))}
+                    aria-label={`Agregar pasajero ${nombre(category)}`}
+                    disabled={tickets >= 10}
+                    onClick={() =>
+                      setCompanions((arr) => (arr.length >= 9 ? arr : [...arr, category]))
+                    }
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                  <span className="min-w-4 text-center text-sm" aria-label={`${count} pasajeros`}>
+                    {count}
+                  </span>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    aria-label={`Quitar pasajero ${nombre(category)}`}
+                    onClick={() =>
+                      setCompanions((arr) => {
+                        const index = arr.indexOf(category);
+                        return index < 0 ? arr : arr.filter((_, i) => i !== index);
+                      })
+                    }
                   >
                     <Minus className="w-4 h-4" />
                   </Button>
@@ -465,10 +503,8 @@ function PassengerPage() {
               <Button
                 variant="outline"
                 className="w-full"
-                disabled={tickets >= 10}
-                onClick={() =>
-                  setCompanions((arr) => [...arr, (profile.category ?? "general") as Category])
-                }
+                disabled={tickets >= 10 || availableCompanionCategories.length === 0}
+                onClick={addCompanion}
               >
                 <Plus className="w-4 h-4 mr-2" /> Agregar acompañante
               </Button>

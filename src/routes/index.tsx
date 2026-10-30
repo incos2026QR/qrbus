@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { QrCode, Bus, UserPlus, LogIn, Loader2 } from "lucide-react";
+import { QrCode, Bus, UserPlus, LogIn, Loader2, Eye, EyeOff } from "lucide-react";
 import { useSession } from "@/hooks/use-session";
 import { PassengerRegister } from "@/components/registration/PassengerRegister";
 import { DriverRegister } from "@/components/registration/DriverRegister";
@@ -42,7 +42,7 @@ function LoginPage() {
             <QrCode className="w-6 h-6 text-primary" />
             <span className="font-bold text-primary">QR Pago Justo</span>
           </div>
-          <h1 className="text-2xl font-bold mt-4">Transporte Público Bolivia</h1>
+          <h1 className="text-2xl font-bold mt-4">Transporte Público Cercado</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Pago justo con validación instantánea
           </p>
@@ -80,6 +80,7 @@ function LoginPage() {
 function LoginForm() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
@@ -116,12 +117,27 @@ function LoginForm() {
       </div>
       <div>
         <Label>Contraseña</Label>
-        <Input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        <div className="relative">
+          <Input
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            className="pr-10"
+            required
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="absolute right-0 top-0"
+            aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+            aria-pressed={showPassword}
+            onClick={() => setShowPassword((visible) => !visible)}
+          >
+            {showPassword ? <EyeOff /> : <Eye />}
+          </Button>
+        </div>
       </div>
       <Button type="submit" disabled={busy} className="w-full">
         {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Iniciar Sesión

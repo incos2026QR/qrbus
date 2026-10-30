@@ -132,3 +132,76 @@ export const createSupervisor = createServerFn({ method: "POST" })
     }
     return { userId: user.user.id };
   });
+
+const supervisorUpdateSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().email(),
+  first_name: z.string().trim().min(1),
+  paternal_surname: z.string().trim(),
+  phone: z.string().trim(),
+});
+
+export const updateSupervisor = createServerFn({ method: "POST" })
+  .inputValidator((d) => supervisorUpdateSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await requireAdmin(supabaseAdmin);
+
+    const { data: authUser, error: getUserError } = await supabaseAdmin.auth.admin.getUserById(data.userId);
+    if (getUserError || !authUser.user) {
+      throw new Error(getUserError?.message ?? "No se encontró el supervisor");
+    }
+
+    const previousEmail = authUser.user.email;
+    const emailChanged = previousEmail !== data.email;
+    if (emailChanged) {
+      const { error } = await supabaseAdmin.auth.admin.updateUserById(data.userId, {
+        email: data.email,
+        email_confirm: true,
+      });
+      if (error) throw new Error(error.message);
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("admins_supervisors")
+      .update({
+        first_name: data.first_name,
+        paternal_surname: data.paternal_surname || null,
+        email: data.email,
+        phone: data.phone || null,
+      })
+      .eq("id", data.userId);
+
+    if (updateError) {
+      if (emailChanged && previousEmail) {
+        const { error: rollbackError } = await supabaseAdmin.auth.admin.updateUserById(data.userId, {
+          email: previousEmail,
+          email_confirm: true,
+        });
+        if (rollbackError) {
+          throw new Error(`${updateError.message}. No se pudo revertir el correo: ${rollbackError.message}`);
+        }
+      }
+      throw new Error(updateError.message);
+    }
+
+    return { ok: true };
+  });
+
+const supervisorPasswordSchema = z.object({
+  userId: z.string().uuid(),
+  password: z.string().min(6),
+});
+
+export const updateSupervisorPassword = createServerFn({ method: "POST" })
+  .inputValidator((d) => supervisorPasswordSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await requireAdmin(supabaseAdmin);
+
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(data.userId, {
+      password: data.password,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });

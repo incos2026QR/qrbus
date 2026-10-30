@@ -16,7 +16,7 @@ import { LogOut, Users, Bus, Shield, BarChart3, CheckCircle2, XCircle, Ban, Menu
 import { Input } from "@/components/ui/input";
 import { cleanAccount, formatAccount } from "@/lib/bank";
 import * as XLSX from "xlsx";
-import { createSupervisor } from "@/lib/auth.functions";
+import { createSupervisor, updateSupervisor, updateSupervisorPassword } from "@/lib/auth.functions";
 import { STATUS_LABELS, ALL_CATEGORIES, type Category } from "@/lib/categories";
 import { useTarifas } from "@/lib/tarifas";
 import { useBancos } from "@/lib/catalogs";
@@ -145,7 +145,7 @@ function UserTable({ role, onChange }: { role: "driver" | "passenger" | "supervi
   }
 
   const filtered = isSupervisors
-    ? rows.filter((r) => String(r.status).toLowerCase() === "active")
+    ? rows
     : rows.filter((r) => (subtab === "pending" ? r.status === "pending" : r.status !== "pending"));
 
   async function saveCategory() {
@@ -197,11 +197,13 @@ function UserTable({ role, onChange }: { role: "driver" | "passenger" | "supervi
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{r.first_name} {r.paternal_surname}</div>
                   <div className="text-xs text-muted-foreground truncate">
-                    CI: {r.ci_number} · {r.phone} {r.driver_code && `· Código: ${r.driver_code}`}
+                    {isSupervisors
+                      ? <>{r.email} · {r.phone || "Sin celular"}</>
+                      : <>CI: {r.ci_number} · {r.phone} {r.driver_code && `· Código: ${r.driver_code}`}</>}
                   </div>
                 </div>
                 <StatusBadge status={r.status} />
-                <Button size="sm" variant="outline" onClick={() => setSelected(r)}>Revisar</Button>
+                <Button size="sm" variant="outline" onClick={() => setSelected(r)}>{isSupervisors ? "Editar" : "Revisar"}</Button>
               </div>
             ))}
           </div>
@@ -210,9 +212,20 @@ function UserTable({ role, onChange }: { role: "driver" | "passenger" | "supervi
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto w-[95vw]">
-          <DialogHeader><DialogTitle>Revisión de verificación de identidad</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{selected?.role === "supervisor" ? "Editar supervisor" : "Revisión de verificación de identidad"}</DialogTitle>
+          </DialogHeader>
           {selected && (
-            <div className="space-y-4">
+            selected.role === "supervisor" ? (
+              <SupervisorEditor
+                supervisor={selected}
+                onSaved={() => {
+                  setSelected(null);
+                  load();
+                  onChange();
+                }}
+              />
+            ) : <div className="space-y-4">
               <div className="text-sm space-y-1">
                 <p><strong>Nombre:</strong> {selected.first_name} {selected.paternal_surname} {selected.maternal_surname}</p>
                 <p><strong>CI:</strong> {selected.ci_number} · <strong>Nacimiento:</strong> {selected.birthdate}</p>
@@ -296,6 +309,120 @@ function UserTable({ role, onChange }: { role: "driver" | "passenger" | "supervi
         </DialogContent>
       </Dialog>
     </Card>
+  );
+}
+
+function SupervisorEditor({ supervisor, onSaved }: { supervisor: Profile; onSaved: () => void }) {
+  const [firstName, setFirstName] = useState(supervisor.first_name ?? "");
+  const [surname, setSurname] = useState(supervisor.paternal_surname ?? "");
+  const [email, setEmail] = useState(supervisor.email ?? "");
+  const [phone, setPhone] = useState(supervisor.phone ?? "");
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function saveDetails() {
+    if (!firstName.trim() || !email.trim()) {
+      return toast.error("El nombre y el correo son obligatorios");
+    }
+    setSaving(true);
+    try {
+      await updateSupervisor({
+        data: {
+          userId: supervisor.id,
+          first_name: firstName.trim(),
+          paternal_surname: surname.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+        },
+      });
+      toast.success("Datos del supervisor actualizados");
+      onSaved();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudieron actualizar los datos");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changePassword() {
+    if (password.length < 6) return toast.error("La contraseña debe tener al menos 6 caracteres");
+    setSaving(true);
+    try {
+      await updateSupervisorPassword({ data: { userId: supervisor.id, password } });
+      setPassword("");
+      toast.success("Contraseña actualizada");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo cambiar la contraseña");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleStatus() {
+    const status = supervisor.status === "suspended" ? "active" : "suspended";
+    setSaving(true);
+    const { error } = await supabase
+      .from("admins_supervisors")
+      .update({ status })
+      .eq("id", supervisor.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success(status === "suspended" ? "Supervisor suspendido" : "Supervisor habilitado");
+    onSaved();
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1 text-sm">
+          <span>Nombre(s)</span>
+          <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+        </label>
+        <label className="space-y-1 text-sm">
+          <span>Apellidos</span>
+          <Input value={surname} onChange={(e) => setSurname(e.target.value)} />
+        </label>
+        <label className="space-y-1 text-sm">
+          <span>Correo</span>
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </label>
+        <label className="space-y-1 text-sm">
+          <span>Número de celular</span>
+          <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </label>
+      </div>
+      <Button onClick={saveDetails} disabled={saving}>Guardar cambios</Button>
+
+      <div className="space-y-2 rounded-md border p-3">
+        <p className="text-sm font-semibold">Cambiar contraseña</p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            type="password"
+            autoComplete="new-password"
+            placeholder="Nueva contraseña (mínimo 6 caracteres)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <Button variant="secondary" onClick={changePassword} disabled={saving || password.length < 6}>
+            Cambiar contraseña
+          </Button>
+        </div>
+      </div>
+
+      <div className="border-t pt-3">
+        <Button
+          variant={supervisor.status === "suspended" ? "default" : "destructive"}
+          onClick={toggleStatus}
+          disabled={saving}
+        >
+          {supervisor.status === "suspended" ? (
+            <><CheckCircle2 className="mr-1 h-4 w-4" /> Habilitar</>
+          ) : (
+            <><Ban className="mr-1 h-4 w-4" /> Suspender</>
+          )}
+        </Button>
+      </div>
+    </div>
   );
 }
 
