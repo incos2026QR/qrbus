@@ -38,6 +38,11 @@ function LoginPage() {
     <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-accent/40 px-4 py-10">
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
+          <img
+            src="/icons/pasaje_qr_512x512.png"
+            alt="Icono de Pasaje QR"
+            className="mx-auto mb-3 h-20 w-20 rounded-xl"
+          />
           <div className="inline-flex items-center gap-2 rounded-2xl bg-primary/10 px-4 py-2">
             <QrCode className="w-6 h-6 text-primary" />
             <span className="font-bold text-primary">QR Pago Justo</span>

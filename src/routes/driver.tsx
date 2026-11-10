@@ -145,35 +145,82 @@ function DriverPage() {
   const [showCount, setShowCount] = useState<string>("5");
 
 
-  function downloadQr() {
+  async function downloadQr() {
     if (!codeQr) return;
     const code = profile?.driver_code ?? "";
-    const img = new Image();
-    img.onload = () => {
+    try {
+      const [qrData] = await Promise.all([
+        QRCode.toDataURL(code, { width: 512, margin: 2, errorCorrectionLevel: "H" }),
+      ]);
+      const loadImage = (src: string) =>
+        new Promise<HTMLImageElement>((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error("No se pudo cargar la imagen para el QR"));
+          image.src = src;
+        });
+      const [logo, qrImage] = await Promise.all([
+        loadImage("/icons/pasaje_qr_512x512.png"),
+        loadImage(qrData),
+      ]);
+
       const W = 640;
       const H = 820;
       const canvas = document.createElement("canvas");
       canvas.width = W;
       canvas.height = H;
       const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.fillStyle = "#ffffff";
+      if (!ctx) throw new Error("No se pudo preparar la imagen para descargar");
+
+      ctx.fillStyle = "#f8fafc";
       ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = "#0b1b3a";
+      ctx.drawImage(logo, 52, 30, 145, 145);
+
+      ctx.fillStyle = "#7dd3fc";
+      ctx.beginPath();
+      ctx.roundRect(222, 42, 72, 48, 4);
+      ctx.fill();
+      ctx.fillStyle = "#1f4fa3";
       ctx.textAlign = "center";
-      ctx.font = "900 96px system-ui, sans-serif";
-      ctx.fillText(code, W / 2, 150);
-      const size = 460;
-      ctx.drawImage(img, (W - size) / 2, 210, size, size);
-      ctx.fillStyle = "#333333";
-      ctx.font = "32px system-ui, sans-serif";
-      ctx.fillText("Escanea el QR o ingresa el código", W / 2, 750);
+      ctx.font = "bold 34px system-ui, sans-serif";
+      ctx.fillText("QR", 258, 77);
+      ctx.textAlign = "left";
+      ctx.font = "bold 50px system-ui, sans-serif";
+      ctx.fillText("Pago Justo", 220, 145, 390);
+      ctx.fillStyle = "#475569";
+      ctx.font = "18px system-ui, sans-serif";
+      ctx.fillText("TRANSPORTE PÚBLICO CERCADO", 222, 174);
+
+      ctx.fillStyle = "#1f4fa3";
+      ctx.fillRect(55, 246, 530, 535);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(78, 273, 484, 481);
+      ctx.fillStyle = "#1f4fa3";
+      ctx.beginPath();
+      ctx.roundRect(130, 212, 380, 72, 24);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.font = "bold 48px system-ui, sans-serif";
+      ctx.fillText("ESCANÉAME", W / 2, 263);
+
+      ctx.fillStyle = "#0b1b3a";
+      ctx.font = "bold 64px system-ui, sans-serif";
+      ctx.fillText(code, W / 2, 354);
+      const size = 340;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(qrImage, (W - size) / 2, 370, size, size);
+      ctx.fillStyle = "#1f2937";
+      ctx.font = "20px system-ui, sans-serif";
+      ctx.fillText("Escanea el QR o ingresa el código", W / 2, 743);
+
       const a = document.createElement("a");
       a.href = canvas.toDataURL("image/png");
       a.download = `${code || "chofer"}-qr.png`;
       a.click();
-    };
-    img.src = codeQr;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo descargar el QR");
+    }
   }
 
 
