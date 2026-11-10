@@ -317,6 +317,7 @@ export type Database = {
           category: Database["public"]["Enums"]["fare_category"]
           created_at: string
           driver_id: string
+          fare_breakdown: Json
           id: string
           latitude: number | null
           longitude: number | null
@@ -329,6 +330,7 @@ export type Database = {
           category: Database["public"]["Enums"]["fare_category"]
           created_at?: string
           driver_id: string
+          fare_breakdown?: Json
           id?: string
           latitude?: number | null
           longitude?: number | null
@@ -341,6 +343,7 @@ export type Database = {
           category?: Database["public"]["Enums"]["fare_category"]
           created_at?: string
           driver_id?: string
+          fare_breakdown?: Json
           id?: string
           latitude?: number | null
           longitude?: number | null

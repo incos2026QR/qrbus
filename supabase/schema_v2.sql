@@ -278,6 +278,7 @@ CREATE TABLE public.transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   driver_id uuid NOT NULL, passenger_id uuid NOT NULL,
   category public.fare_category NOT NULL, amount numeric NOT NULL,
+  fare_breakdown jsonb NOT NULL DEFAULT '[]'::jsonb,
   verification_code text NOT NULL, tickets integer NOT NULL DEFAULT 1,
   latitude numeric, longitude numeric,
   created_at timestamptz NOT NULL DEFAULT now()
@@ -398,6 +399,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   _p public.passengers%ROWTYPE; _d public.drivers%ROWTYPE;
   _base numeric; _extra numeric := 0; _total numeric; _code text; _bal numeric; _n int; _c public.fare_category;
+  _fare_breakdown jsonb;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'No autenticado'; END IF;
   _n := 1 + coalesce(array_length(_companions,1),0);
@@ -412,11 +414,36 @@ BEGIN
   END IF;
   _total := _base + _extra;
   IF _p.balance < _total THEN RAISE EXCEPTION 'Saldo insuficiente'; END IF;
+  _fare_breakdown := jsonb_build_array(jsonb_build_object(
+    'category', _p.fare_category::text, 'tickets', 1, 'amount', _base, 'kind', 'titular'
+  ));
+  IF coalesce(array_length(_companions, 1), 0) > 0 THEN
+    SELECT _fare_breakdown || coalesce(jsonb_agg(
+      jsonb_build_object(
+        'category', companions.category::text,
+        'tickets', companions.tickets,
+        'amount', companions.amount,
+        'kind', 'acompanante'
+      ) ORDER BY companions.category
+    ), '[]'::jsonb)
+    INTO _fare_breakdown
+    FROM (
+      SELECT companion.category, count(*)::integer AS tickets,
+             public.fare_for_category(companion.category) * count(*) AS amount
+      FROM unnest(_companions) AS companion(category)
+      GROUP BY companion.category
+    ) AS companions;
+  END IF;
   _code := lpad(floor(random()*100000)::int::text, 5, '0');
   UPDATE public.passengers SET balance = balance - _total WHERE id = _p.id RETURNING balance INTO _bal;
   UPDATE public.drivers SET balance = balance + _total WHERE id = _d.id;
-  INSERT INTO public.transactions (driver_id, passenger_id, category, amount, verification_code, tickets, latitude, longitude)
-  VALUES (_d.id, _p.id, _p.fare_category, _total, _code, _n, _lat, _lng);
+  INSERT INTO public.transactions (
+    driver_id, passenger_id, category, amount, verification_code, tickets,
+    latitude, longitude, fare_breakdown
+  ) VALUES (
+    _d.id, _p.id, _p.fare_category, _total, _code, _n,
+    _lat, _lng, _fare_breakdown
+  );
   RETURN QUERY SELECT _code, _total, _base, _extra, _p.fare_category, _n, _bal;
 END; $$;
 

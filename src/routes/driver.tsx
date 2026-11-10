@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/hooks/use-session";
@@ -28,12 +28,15 @@ import {
   Eye,
   EyeOff,
   Flag,
+  Plus,
+  Minus,
 } from "lucide-react";
 
 import { isBluetoothSupported, linkHardware, sendPaymentOk } from "@/lib/bluetooth";
 import { cleanAccount, formatAccount } from "@/lib/bank";
 import { STATUS_LABELS, isActiveStatus, isBlockedStatus } from "@/lib/categories";
 import { ResubmitDocs, DRIVER_DOCS } from "@/components/ResubmitDocs";
+import { useTarifas } from "@/lib/tarifas";
 import QRCode from "qrcode";
 
 export const Route = createFileRoute("/driver")({ ssr: false, component: DriverPage });
@@ -45,16 +48,85 @@ type Tx = {
   verification_code: string;
   created_at: string;
   tickets: number;
+  fare_breakdown?: FareBreakdownItem[] | null;
 };
+
+type FareBreakdownItem = {
+  category: string;
+  tickets: number;
+  amount: number;
+  kind: "titular" | "acompanante";
+};
+
+function FareBreakdown({
+  transaction,
+  nombre,
+}: {
+  transaction: Tx;
+  nombre: (category: string) => string;
+}) {
+  const items = Array.isArray(transaction.fare_breakdown) ? transaction.fare_breakdown : [];
+  const holder = items.find((item) => item.kind === "titular");
+  const companions = items.filter((item) => item.kind === "acompanante");
+
+  return (
+    <div className="mt-4 w-full max-w-sm rounded-lg border border-border bg-background p-3 text-left text-foreground">
+      <div className="space-y-2">
+        {holder || companions.length > 0 ? (
+          <>
+            {holder && (
+              <div className="flex items-start justify-between gap-3 text-sm">
+                <span>Titular {nombre(holder.category)}</span>
+                <span className="shrink-0 font-medium tabular-nums">
+                  Bs {Number(holder.amount).toFixed(2)}
+                </span>
+              </div>
+            )}
+            {companions.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Acompañantes:</p>
+                {companions.map((item, index) => (
+                  <div
+                    key={`${item.category}-${index}`}
+                    className="flex items-start justify-between gap-3 text-sm"
+                  >
+                    <span>
+                      {item.tickets > 1 ? `${item.tickets} ` : ""}
+                      {nombre(item.category)}
+                    </span>
+                    <span className="shrink-0 font-medium tabular-nums">
+                      Bs {Number(item.amount).toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Detalle por tipo no disponible para este pago.
+          </p>
+        )}
+      </div>
+      <div className="mt-2 flex justify-between gap-3 border-t pt-2 font-bold">
+        <span>Total pagado</span>
+        <span className="shrink-0 tabular-nums">Bs {Number(transaction.amount).toFixed(2)}</span>
+      </div>
+    </div>
+  );
+}
 
 function DriverPage() {
   const { profile, userId, loading, refresh } = useSession();
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const { nombre } = useTarifas();
   const navigate = useNavigate();
   const [txs, setTxs] = useState<Tx[]>([]);
-  const [lastCode, setLastCode] = useState<string | null>(null);
-  const [lastTickets, setLastTickets] = useState<number>(0);
+  const [lastPayment, setLastPayment] = useState<Tx | null>(null);
   const [flash, setFlash] = useState(false);
   const [codeQr, setCodeQr] = useState<string | null>(null);
+  const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
 
   // Withdraw modal
   const [wOpen, setWOpen] = useState(false);
@@ -156,43 +228,76 @@ function DriverPage() {
 
   useEffect(() => {
     if (!userId) return;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    supabase
-      .from("transactions")
-      .select("*")
-      .eq("driver_id", userId)
-      .gte("created_at", today.toISOString())
-      .order("created_at", { ascending: false })
-      .then(({ data }) => setTxs((data as Tx[]) ?? []));
+    const driverId = userId;
+    let active = true;
+    let flashTimeout: ReturnType<typeof setTimeout> | undefined;
+    let glowTimeout: ReturnType<typeof setTimeout> | undefined;
+
+    function mergeTransactions(current: Tx[], incoming: Tx[]) {
+      const byId = new Map(current.map((transaction) => [transaction.id, transaction]));
+      for (const transaction of incoming) byId.set(transaction.id, transaction);
+      return Array.from(byId.values()).sort(
+        (first, second) =>
+          new Date(second.created_at).getTime() - new Date(first.created_at).getTime(),
+      );
+    }
+
+    async function loadTodayTransactions() {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("*")
+        .eq("driver_id", driverId)
+        .gte("created_at", today.toISOString())
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (!active) return;
+      if (error) {
+        toast.error(`No se pudieron cargar las validaciones: ${error.message}`);
+        return;
+      }
+      setTxs((current) => mergeTransactions(current, (data as Tx[]) ?? []));
+    }
 
     const ch = supabase
-      .channel("driver-tx-" + userId)
+      .channel("driver-tx-" + driverId)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "transactions",
-          filter: `driver_id=eq.${userId}`,
+          filter: `driver_id=eq.${driverId}`,
         },
         (payload) => {
           const t = payload.new as Tx;
-          setTxs((prev) => [t, ...prev]);
-          setLastCode(t.verification_code);
-          setLastTickets(Number(t.tickets ?? 1));
+          setTxs((current) => mergeTransactions(current, [t]));
+          setLastPayment(t);
           setFlash(true);
           setGlow(true);
           playSuccessChime();
           void sendPaymentOk(Number(t.amount ?? 0));
-          refresh();
-          setTimeout(() => setFlash(false), 3000);
-          setTimeout(() => setGlow(false), 10000);
+          void refreshRef.current();
+          if (flashTimeout) clearTimeout(flashTimeout);
+          if (glowTimeout) clearTimeout(glowTimeout);
+          flashTimeout = setTimeout(() => setFlash(false), 5000);
+          glowTimeout = setTimeout(() => setGlow(false), 10000);
         },
       )
-
-      .subscribe();
+      .subscribe((status, error) => {
+        if (status === "SUBSCRIBED") {
+          void loadTodayTransactions();
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          toast.error(
+            `No se pudo mantener la actualización en tiempo real${error?.message ? `: ${error.message}` : "."}`,
+          );
+        }
+      });
     return () => {
+      active = false;
+      if (flashTimeout) clearTimeout(flashTimeout);
+      if (glowTimeout) clearTimeout(glowTimeout);
       supabase.removeChannel(ch);
     };
   }, [userId]);
@@ -299,22 +404,24 @@ function DriverPage() {
 
   return (
     <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4 relative">
-      {/* Full-screen success overlay: no category, no amount */}
+      {/* Full-screen success overlay */}
       {flash && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center text-center p-6">
+        <div className="fixed inset-0 z-50 flex min-h-full flex-col items-center justify-start overflow-y-auto bg-black p-6 py-8 text-center sm:justify-center">
           <BadgeCheck className="w-24 h-24 text-[#00FF66] mb-4" />
           <p className="text-4xl font-black text-[#00FF66] uppercase tracking-wide">
             ¡Pago Recibido!
           </p>
           <p className="text-3xl font-black text-white mt-2">
-            {lastTickets} Pasaje{lastTickets > 1 ? "s" : ""}
+            {Number(lastPayment?.tickets ?? 1)} Pasaje
+            {Number(lastPayment?.tickets ?? 1) > 1 ? "s" : ""}
           </p>
           <p className="text-white/70 mt-6 text-base uppercase tracking-[0.3em]">
             Código de validación
           </p>
           <p className="text-[5.5rem] leading-none font-black text-[#00FF66] tracking-widest tabular-nums drop-shadow-[0_0_25px_rgba(0,255,102,0.6)]">
-            {lastCode}
+            {lastPayment?.verification_code}
           </p>
+          {lastPayment && <FareBreakdown transaction={lastPayment} nombre={nombre} />}
         </div>
       )}
 
@@ -519,6 +626,7 @@ function DriverPage() {
           <p className="text-xl font-bold">
             {Number(txs[0].tickets ?? 1)} Pasaje{Number(txs[0].tickets ?? 1) > 1 ? "s" : ""} · Pago recibido
           </p>
+          <FareBreakdown transaction={txs[0]} nombre={nombre} />
         </div>
       )}
 
@@ -542,14 +650,42 @@ function DriverPage() {
         </div>
         <div className="divide-y text-sm">
           {(showCount === "all" ? txs : txs.slice(0, Number(showCount))).map((t) => (
-            <div key={t.id} className="py-2 flex justify-between items-center gap-2">
-              <span className="font-mono text-base font-bold">{t.verification_code}</span>
-              <span>
-                {Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {new Date(t.created_at).toLocaleTimeString()}
-              </span>
+            <div key={t.id} className="py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-base font-bold">{t.verification_code}</span>
+                <span>
+                  {Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {new Date(t.created_at).toLocaleTimeString()}
+                </span>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="h-7 w-7 shrink-0"
+                  aria-label={
+                    expandedTransactionId === t.id
+                      ? `Ocultar desglose del pago ${t.verification_code}`
+                      : `Ver desglose del pago ${t.verification_code}`
+                  }
+                  aria-expanded={expandedTransactionId === t.id}
+                  onClick={() =>
+                    setExpandedTransactionId((current) => (current === t.id ? null : t.id))
+                  }
+                >
+                  {expandedTransactionId === t.id ? (
+                    <Minus className="h-4 w-4" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              {expandedTransactionId === t.id && (
+                <div className="pl-1">
+                  <FareBreakdown transaction={t} nombre={nombre} />
+                </div>
+              )}
             </div>
           ))}
           {txs.length === 0 && (

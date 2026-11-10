@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   passenger_id      uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   category          public.fare_category NOT NULL,
   amount            numeric NOT NULL,
+  fare_breakdown    jsonb NOT NULL DEFAULT '[]'::jsonb,
   tickets           integer NOT NULL DEFAULT 1,
   verification_code text NOT NULL,
   latitude          numeric,

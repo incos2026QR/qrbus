@@ -33,7 +33,7 @@ export function ageBucket(age: number): {
   options: Category[];
   requiresUniversityDoc?: boolean;
 } {
-  if (age < 18) return { forced: "primaria", options: ["primaria"] };
+  if (age <= 14) return { forced: "primaria", options: ["primaria"] };
   if (age >= 60) return { forced: "adulto_mayor", options: ["adulto_mayor"] };
   if (age <= 27) return { options: ["secundaria", "general"], requiresUniversityDoc: true };
   return { options: ["general"] };

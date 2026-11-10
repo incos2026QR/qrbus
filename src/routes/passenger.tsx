@@ -448,7 +448,7 @@ function PassengerPage() {
               </p>
 
               {companionSummary.map(({ category, count }) => (
-                <div key={category} className="flex items-center gap-2">
+                <div key={category} className="flex w-full min-w-0 items-center gap-2">
                   <Select
                     value={category}
                     onValueChange={(v) =>
@@ -457,8 +457,8 @@ function PassengerPage() {
                       )
                     }
                   >
-                    <SelectTrigger className="flex-1">
-                      <SelectValue />
+                    <SelectTrigger className="min-w-0 flex-1">
+                      <SelectValue className="min-w-0 flex-1 truncate text-left" />
                     </SelectTrigger>
                     <SelectContent>
                       {CATEGORY_OPTIONS.filter(
@@ -473,6 +473,7 @@ function PassengerPage() {
                   <Button
                     size="icon"
                     variant="outline"
+                    className="shrink-0"
                     aria-label={`Agregar pasajero ${nombre(category)}`}
                     disabled={tickets >= 10}
                     onClick={() =>
@@ -481,12 +482,16 @@ function PassengerPage() {
                   >
                     <Plus className="w-4 h-4" />
                   </Button>
-                  <span className="min-w-4 text-center text-sm" aria-label={`${count} pasajeros`}>
+                  <span
+                    className="min-w-4 shrink-0 text-center text-sm"
+                    aria-label={`${count} pasajeros`}
+                  >
                     {count}
                   </span>
                   <Button
                     size="icon"
                     variant="outline"
+                    className="shrink-0"
                     aria-label={`Quitar pasajero ${nombre(category)}`}
                     onClick={() =>
                       setCompanions((arr) => {
