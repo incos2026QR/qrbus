@@ -37,7 +37,11 @@ import { Input } from "@/components/ui/input";
 import { cleanAccount, formatAccount } from "@/lib/bank";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
-import { createSupervisor, updateSupervisor, updateSupervisorPassword } from "@/lib/auth.functions";
+import {
+  createSupervisor,
+  updateSupervisor,
+  updateSupervisorPassword,
+} from "@/lib/auth.functions";
 import { STATUS_LABELS, ALL_CATEGORIES, type Category } from "@/lib/categories";
 import { useTarifas } from "@/lib/tarifas";
 import { useBancos } from "@/lib/catalogs";
@@ -45,6 +49,23 @@ import { useBancos } from "@/lib/catalogs";
 export const Route = createFileRoute("/admin")({ ssr: false, component: AdminPage });
 
 type Tab = "drivers" | "passengers" | "supervisors" | "transactions" | "reports";
+
+function normalizeProfileStatus(status?: string | null): Profile["status"] {
+  const normalized = String(status ?? "").trim().toLowerCase();
+
+  switch (normalized) {
+    case "pending":
+      return "pending";
+    case "rejected":
+    case "rechazado":
+    case "rechazada":
+      return "rejected";
+    case "suspended":
+      return "suspended";
+    default:
+      return "active";
+  }
+}
 
 function AdminPage() {
   const { profile, loading, refresh } = useSession();
@@ -55,7 +76,11 @@ function AdminPage() {
   useEffect(() => {
     if (loading) return;
     if (!profile) navigate({ to: "/" });
-    else if (profile.role !== "admin" && profile.role !== "supervisor") navigate({ to: "/" });
+    else if (profile.status === "suspended") {
+      toast.error("Tu cuenta está suspendida. Contacta al administrador.");
+      supabase.auth.signOut();
+      navigate({ to: "/" });
+    } else if (profile.role !== "admin" && profile.role !== "supervisor") navigate({ to: "/" });
   }, [loading, profile, navigate]);
 
   if (loading || !profile) return <div className="p-8">Cargando...</div>;
@@ -119,8 +144,8 @@ function AdminPage() {
   );
 
   const brandBlock = (
-    <div className="p-4 border-b border-white/10">
-      <div className="font-bold text-lg">QR Pago Justo</div>
+    <div className="border-b border-white/15 p-4">
+      <div className="font-bold text-lg text-white">QR Pago Justo</div>
       <div className="text-xs opacity-70">{isAdmin ? "Administrador" : "Supervisor"}</div>
     </div>
   );
@@ -131,39 +156,43 @@ function AdminPage() {
         await supabase.auth.signOut();
         navigate({ to: "/" });
       }}
-      className="w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-white/10 text-sm"
+      className="w-full flex items-center gap-2 rounded px-3 py-2 text-sm text-white hover:bg-white/10"
     >
       <LogOut className="w-4 h-4" /> Cerrar sesión
     </button>
   );
 
   return (
-    <div className="min-h-screen md:flex">
+    <div className="min-h-screen bg-gradient-to-br from-brand-blue-light/40 via-background to-brand-orange-light/30 md:flex">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-60 bg-sidebar text-sidebar-foreground flex-col">
+      <aside className="hidden w-60 flex-col bg-brand-blue-dark text-white md:flex">
         {brandBlock}
         <nav className="flex-1 p-2 space-y-1">{nav}</nav>
-        <div className="p-2 border-t border-white/10">{signOut}</div>
+        <div className="border-t border-white/15 p-2">{signOut}</div>
       </aside>
 
       {/* Mobile top bar */}
-      <div className="md:hidden flex items-center justify-between p-3 bg-sidebar text-sidebar-foreground">
+      <div className="flex items-center justify-between bg-brand-blue-dark p-3 text-white md:hidden">
         <div className="font-bold">QR Pago Justo</div>
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
           <SheetTrigger asChild>
-            <Button size="icon" variant="ghost" className="text-sidebar-foreground">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="text-white hover:bg-white/10 hover:text-white"
+            >
               <Menu className="w-5 h-5" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="p-0 bg-sidebar text-sidebar-foreground w-64">
+          <SheetContent side="left" className="w-64 bg-brand-blue-dark p-0 text-white">
             {brandBlock}
             <nav className="flex-1 p-2 space-y-1">{nav}</nav>
-            <div className="p-2 border-t border-white/10">{signOut}</div>
+            <div className="border-t border-white/15 p-2">{signOut}</div>
           </SheetContent>
         </Sheet>
       </div>
 
-      <main className="flex-1 p-4 sm:p-6 bg-background overflow-auto max-w-full">
+      <main className="max-w-full flex-1 overflow-auto p-4 sm:p-6">
         {tab === "drivers" && <UserTable role="driver" onChange={refresh} />}
         {tab === "passengers" && <UserTable role="passenger" onChange={refresh} />}
         {tab === "supervisors" && isAdmin && <UserTable role="supervisor" onChange={refresh} />}
@@ -190,8 +219,8 @@ function NavBtn({
       onClick={onClick}
       className={`w-full flex items-center gap-2 px-3 py-2 rounded text-sm transition ${
         active
-          ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
-          : "hover:bg-white/10"
+          ? "bg-brand-orange text-brand-ink font-semibold"
+          : "text-white/90 hover:bg-white/10 hover:text-white"
       }`}
     >
       {icon}
@@ -219,12 +248,61 @@ function UserTable({
   const { bancos } = useBancos();
 
   async function load() {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("role", role)
-      .order("created_at", { ascending: false });
-    setRows((data as Profile[]) ?? []);
+    let data: Profile[] | null = null;
+
+    if (isSupervisors) {
+      const { data: supervisorRows } = await supabase
+        .from("admins_supervisors")
+        .select("*")
+        .eq("role", "supervisor")
+        .order("created_at", { ascending: false });
+
+      data = (supervisorRows ?? []).map((row) => ({
+        id: row.id,
+        role: "supervisor",
+        status: normalizeProfileStatus(row.status),
+        first_name: row.first_name,
+        paternal_surname: row.paternal_surname,
+        maternal_surname: null,
+        ci_number: null,
+        birthdate: null,
+        phone: row.phone,
+        email: row.email,
+        category: null,
+        driver_code: null,
+        ci_front_url: null,
+        ci_back_url: null,
+        selfie_url: null,
+        license_url: null,
+        extra_doc_url: null,
+        qr_general_url: null,
+        qr_primaria_url: null,
+        qr_secundaria_url: null,
+        qr_adulto_url: null,
+        bank_account: null,
+        bank_name: null,
+        transport_line: null,
+        union_doc_url: null,
+        rejection_reason: null,
+        resubmission_count: 0,
+        balance: 0,
+      }));
+    } else {
+      const { data: profileRows } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("role", role)
+        .order("created_at", { ascending: false });
+
+      data = (profileRows as Profile[] | null) ?? [];
+    }
+
+    const normalizedRows = (data ?? []).map((row) => ({
+      ...row,
+      status: normalizeProfileStatus(row.status),
+    }));
+
+    setRows(normalizedRows);
   }
   useEffect(() => {
     load();
@@ -287,18 +365,26 @@ function UserTable({
   }
 
   return (
-    <Card className="p-4 max-w-full overflow-hidden">
+    <Card className="max-w-full overflow-hidden border-brand-blue/15 p-4 shadow-md">
       <h2 className="text-xl font-bold capitalize mb-3">
         {role === "driver" ? "Choferes" : role === "passenger" ? "Pasajeros" : "Supervisores"}
       </h2>
       {isSupervisors && <AddSupervisor onCreated={load} />}
       <Tabs value={subtab} onValueChange={(v) => setSubtab(v as "pending" | "active")}>
         {!isSupervisors && (
-          <TabsList>
-            <TabsTrigger value="pending">
+          <TabsList className="bg-brand-blue-light/70">
+            <TabsTrigger
+              value="pending"
+              className="text-brand-blue-dark data-[state=active]:bg-brand-blue data-[state=active]:text-white"
+            >
               Pendientes ({rows.filter((r) => r.status === "pending").length})
             </TabsTrigger>
-            <TabsTrigger value="active">Inscritos / Activos</TabsTrigger>
+            <TabsTrigger
+              value="active"
+              className="text-brand-blue-dark data-[state=active]:bg-brand-blue data-[state=active]:text-white"
+            >
+              Inscritos / Activos
+            </TabsTrigger>
           </TabsList>
         )}
         <TabsContent value={subtab} className="mt-3">
@@ -326,7 +412,12 @@ function UserTable({
                   </div>
                 </div>
                 <StatusBadge status={r.status} />
-                <Button size="sm" variant="outline" onClick={() => setSelected(r)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+                  onClick={() => setSelected(r)}
+                >
                   {isSupervisors ? "Editar" : "Revisar"}
                 </Button>
               </div>
@@ -336,7 +427,7 @@ function UserTable({
       </Tabs>
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto w-[95vw]">
+        <DialogContent className="max-h-[90vh] w-[95vw] max-w-3xl overflow-y-auto border-brand-blue/20">
           <DialogHeader>
             <DialogTitle>
               {selected?.role === "supervisor"
@@ -395,7 +486,7 @@ function UserTable({
                   </p>
                 </div>
 
-                <div className="rounded-md border p-3 space-y-2">
+                <div className="space-y-2 rounded-md border border-brand-blue/15 p-3">
                   <p className="text-sm font-semibold">Banco y número de cuenta</p>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Select value={bankName} onValueChange={setBankName}>
@@ -417,7 +508,8 @@ function UserTable({
                       placeholder="Ej. 104578"
                     />
                     <Button
-                      variant="secondary"
+                      variant="outline"
+                      className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
                       onClick={saveBankAccount}
                       disabled={!bankAccount.trim() || !bankName}
                     >
@@ -430,7 +522,7 @@ function UserTable({
                 </div>
 
                 {selected.role === "passenger" && (
-                  <div className="rounded-md border p-3 space-y-2">
+                  <div className="space-y-2 rounded-md border border-brand-blue/15 p-3">
                     <p className="text-sm font-semibold">Modificar categoría de tarifa</p>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <Select
@@ -449,7 +541,8 @@ function UserTable({
                         </SelectContent>
                       </Select>
                       <Button
-                        variant="secondary"
+                        variant="outline"
+                        className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
                         onClick={saveCategory}
                         disabled={!overrideCategory || overrideCategory === selected.category}
                       >
@@ -496,7 +589,7 @@ function UserTable({
                     />
                   )}
                 </div>
-                <div className="rounded-md border p-3 space-y-2">
+                <div className="space-y-2 rounded-md border border-brand-blue/15 p-3">
                   <p className="text-sm font-semibold">Motivo de rechazo</p>
                   <Textarea
                     value={rejectionReason}
@@ -581,16 +674,32 @@ function SupervisorEditor({ supervisor, onSaved }: { supervisor: Profile; onSave
   }
 
   async function toggleStatus() {
-    const status = supervisor.status === "suspended" ? "active" : "suspended";
+    const currentStatus = normalizeProfileStatus(supervisor.status);
+    const nextStatus = currentStatus === "suspended" ? "active" : "suspended";
+
+    if (supervisor.role === "admin") {
+      toast.error("No puedes suspender al administrador principal");
+      return;
+    }
+
     setSaving(true);
-    const { error } = await supabase
-      .from("admins_supervisors")
-      .update({ status })
-      .eq("id", supervisor.id);
-    setSaving(false);
-    if (error) return toast.error(error.message);
-    toast.success(status === "suspended" ? "Supervisor suspendido" : "Supervisor habilitado");
-    onSaved();
+    try {
+      const { error } = await supabase
+        .from("admins_supervisors")
+        .update({ status: nextStatus })
+        .eq("id", supervisor.id)
+        .eq("role", "supervisor");
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      toast.success(nextStatus === "suspended" ? "Supervisor suspendido" : "Supervisor habilitado");
+      onSaved();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo actualizar el estado");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -613,11 +722,15 @@ function SupervisorEditor({ supervisor, onSaved }: { supervisor: Profile; onSave
           <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
         </label>
       </div>
-      <Button onClick={saveDetails} disabled={saving}>
+      <Button
+        onClick={saveDetails}
+        disabled={saving}
+        className="bg-brand-blue text-white hover:bg-brand-blue-dark"
+      >
         Guardar cambios
       </Button>
 
-      <div className="space-y-2 rounded-md border p-3">
+      <div className="space-y-2 rounded-md border border-brand-blue/15 p-3">
         <p className="text-sm font-semibold">Cambiar contraseña</p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
@@ -628,7 +741,8 @@ function SupervisorEditor({ supervisor, onSaved }: { supervisor: Profile; onSave
             onChange={(e) => setPassword(e.target.value)}
           />
           <Button
-            variant="secondary"
+            variant="outline"
+            className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
             onClick={changePassword}
             disabled={saving || password.length < 6}
           >
@@ -639,11 +753,16 @@ function SupervisorEditor({ supervisor, onSaved }: { supervisor: Profile; onSave
 
       <div className="border-t pt-3">
         <Button
-          variant={supervisor.status === "suspended" ? "default" : "destructive"}
+          variant={normalizeProfileStatus(supervisor.status) === "suspended" ? "default" : "destructive"}
+          className={
+            normalizeProfileStatus(supervisor.status) === "suspended"
+              ? "bg-brand-blue text-white hover:bg-brand-blue-dark"
+              : undefined
+          }
           onClick={toggleStatus}
           disabled={saving}
         >
-          {supervisor.status === "suspended" ? (
+          {normalizeProfileStatus(supervisor.status) === "suspended" ? (
             <>
               <CheckCircle2 className="mr-1 h-4 w-4" /> Habilitar
             </>
@@ -695,11 +814,15 @@ function AddSupervisor({ onCreated }: { onCreated: () => void }) {
 
   return (
     <div className="mb-3">
-      <Button size="sm" onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        className="bg-brand-blue text-white hover:bg-brand-blue-dark"
+        onClick={() => setOpen(true)}
+      >
         + Agregar Supervisor
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm border-brand-blue/20">
           <DialogHeader>
             <DialogTitle>Nuevo supervisor</DialogTitle>
           </DialogHeader>
@@ -725,7 +848,11 @@ function AddSupervisor({ onCreated }: { onCreated: () => void }) {
               value={surname}
               onChange={(e) => setSurname(e.target.value)}
             />
-            <Button className="w-full" onClick={create} disabled={busy}>
+            <Button
+              className="w-full bg-brand-blue text-white hover:bg-brand-blue-dark"
+              onClick={create}
+              disabled={busy}
+            >
               Crear supervisor
             </Button>
           </div>
@@ -736,13 +863,28 @@ function AddSupervisor({ onCreated }: { onCreated: () => void }) {
 }
 
 function StatusBadge({ status }: { status: Profile["status"] }) {
+  const normalizedStatus = normalizeProfileStatus(status);
   const map = {
     pending: "secondary",
     active: "default",
     rejected: "destructive",
     suspended: "outline",
   } as const;
-  return <Badge variant={map[status]}>{STATUS_LABELS[status] ?? status}</Badge>;
+
+  return (
+    <Badge
+      variant={map[normalizedStatus]}
+      className={
+        normalizedStatus === "active"
+          ? "border-transparent bg-brand-blue text-white"
+          : normalizedStatus === "suspended"
+            ? "border-orange-200 bg-orange-50 text-orange-700"
+            : undefined
+      }
+    >
+      {STATUS_LABELS[normalizedStatus] ?? normalizedStatus}
+    </Badge>
+  );
 }
 
 function ImagePreview({
@@ -863,7 +1005,7 @@ function ReportsPanel() {
   }
 
   return (
-    <Card className="p-4 max-w-full overflow-hidden">
+    <Card className="max-w-full overflow-hidden border-brand-blue/15 p-4 shadow-md">
       <h2 className="text-xl font-bold mb-3">Reportes de usuarios</h2>
       {rows.length === 0 && <p className="text-sm text-muted-foreground">No hay reportes.</p>}
       <div className="divide-y overflow-x-auto">
@@ -890,7 +1032,12 @@ function ReportsPanel() {
             >
               {REPORT_STATUS_LABELS[r.status] ?? r.status}
             </Badge>
-            <Button size="sm" variant="outline" onClick={() => setSelected(r)}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+              onClick={() => setSelected(r)}
+            >
               Ver
             </Button>
           </div>
@@ -898,7 +1045,7 @@ function ReportsPanel() {
       </div>
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto w-[95vw]">
+        <DialogContent className="max-h-[90vh] w-[95vw] max-w-2xl overflow-y-auto border-brand-blue/20">
           <DialogHeader>
             <DialogTitle>Detalle del reporte</DialogTitle>
           </DialogHeader>
@@ -933,7 +1080,7 @@ function ReportsPanel() {
               </div>
 
               {reporterProfile && (
-                <div className="rounded border p-2">
+                <div className="rounded border border-brand-blue/15 p-2">
                   <p className="text-xs uppercase text-muted-foreground">Reportado por</p>
                   <p>
                     <strong>
@@ -955,7 +1102,7 @@ function ReportsPanel() {
                 </div>
               )}
               {reportedProfile && (
-                <div className="rounded border p-2">
+                <div className="rounded border border-brand-blue/15 p-2">
                   <p className="text-xs uppercase text-muted-foreground">Chofer reportado</p>
                   <p>
                     <strong>
@@ -983,7 +1130,11 @@ function ReportsPanel() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button onClick={() => updateReport("reviewing")} variant="secondary">
+                <Button
+                  onClick={() => updateReport("reviewing")}
+                  variant="outline"
+                  className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+                >
                   En revisión
                 </Button>
                 <Button
@@ -992,7 +1143,11 @@ function ReportsPanel() {
                 >
                   Resuelto
                 </Button>
-                <Button onClick={() => updateReport("dismissed")} variant="outline">
+                <Button
+                  onClick={() => updateReport("dismissed")}
+                  variant="outline"
+                  className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+                >
                   Descartar
                 </Button>
               </div>
@@ -1399,13 +1554,14 @@ function TransactionsPanel() {
   }
 
   return (
-    <Card className="p-4 max-w-full overflow-hidden">
+    <Card className="max-w-full overflow-hidden border-brand-blue/15 p-4 shadow-md">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="text-xl font-bold">Historial de transacciones</h2>
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
-            variant="secondary"
+            variant="outline"
+            className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
             onClick={exportExcel}
             disabled={loading || filteredRows.length === 0 || Boolean(dateError)}
           >
@@ -1413,6 +1569,7 @@ function TransactionsPanel() {
           </Button>
           <Button
             size="sm"
+            className="bg-brand-blue text-white hover:bg-brand-blue-dark"
             onClick={generatePdf}
             disabled={loading || filteredRows.length === 0 || Boolean(dateError)}
           >
@@ -1567,7 +1724,7 @@ function TransactionsPanel() {
                 <td className="py-2 pr-3">
                   {t.latitude != null && t.longitude != null ? (
                     <a
-                      className="inline-flex items-center gap-1 text-primary underline"
+                      className="inline-flex items-center gap-1 text-brand-blue underline"
                       href={`https://www.google.com/maps?q=${t.latitude},${t.longitude}`}
                       target="_blank"
                       rel="noreferrer"

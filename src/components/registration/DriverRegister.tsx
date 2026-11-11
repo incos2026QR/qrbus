@@ -202,7 +202,7 @@ export function DriverRegister() {
         type="button"
         variant="outline"
         onClick={autofill}
-        className="w-full border-primary text-primary"
+        className="w-full border-brand-blue text-brand-blue hover:bg-brand-blue-light"
       >
         <Sparkles className="w-4 h-4 mr-2" /> Cargar Datos de Prueba
       </Button>
@@ -333,7 +333,11 @@ export function DriverRegister() {
         />
       </div>
       <Captcha verified={captchaOk} onVerify={setCaptchaOk} />
-      <Button type="submit" disabled={busy} className="w-full">
+      <Button
+        type="submit"
+        disabled={busy}
+        className="w-full bg-brand-orange text-brand-ink hover:bg-brand-orange-dark"
+      >
         {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Registrarme como Chofer
       </Button>
     </form>

@@ -31,10 +31,21 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
   };
 }
 
+function readEnvValue(...names: string[]) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value && value.trim()) return value;
+  }
+  return undefined;
+}
+
 export const requireSupabaseAuth = createMiddleware({ type: "function" }).server(
   async ({ next }) => {
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+    const SUPABASE_URL = readEnvValue("SUPABASE_URL", "MY_SUPABASE_URL");
+    const SUPABASE_PUBLISHABLE_KEY = readEnvValue(
+      "SUPABASE_PUBLISHABLE_KEY",
+      "MY_SUPABASE_PUBLISHABLE_KEY",
+    );
 
     if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
       const missing = [

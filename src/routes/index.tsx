@@ -29,13 +29,20 @@ function LoginPage() {
       return;
     }
     if (!profile) return;
+
+    if (profile.status === "suspended") {
+      toast.error("Tu cuenta está suspendida. Contacta al administrador.");
+      supabase.auth.signOut();
+      return;
+    }
+
     if (profile.role === "admin" || profile.role === "supervisor") navigate({ to: "/admin" });
     else if (profile.role === "driver") navigate({ to: "/driver" });
     else navigate({ to: "/passenger" });
   }, [loading, userId, profile, missingProfile, navigate]);
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-accent/40 px-4 py-10">
+    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-blue-light via-background to-brand-orange-light px-4 py-10">
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <img
@@ -43,26 +50,35 @@ function LoginPage() {
             alt="Icono de Pasaje QR"
             className="mx-auto mb-3 h-20 w-20 rounded-xl"
           />
-          <div className="inline-flex items-center gap-2 rounded-2xl bg-primary/10 px-4 py-2">
-            <QrCode className="w-6 h-6 text-primary" />
-            <span className="font-bold text-primary">QR Pago Justo</span>
+          <div className="inline-flex items-center gap-2 rounded-2xl bg-brand-orange-light px-4 py-2">
+            <QrCode className="w-6 h-6 text-brand-orange-dark" />
+            <span className="font-bold text-brand-blue-dark">QR Pago Justo</span>
           </div>
-          <h1 className="text-2xl font-bold mt-4">Transporte Público Cercado</h1>
+          <h1 className="text-2xl font-bold mt-4 text-brand-ink">Transporte Público Cercado</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Pago justo con validación instantánea
           </p>
         </div>
 
-        <Card className="p-4 sm:p-6 max-w-full overflow-hidden">
+        <Card className="max-w-full overflow-hidden border-brand-blue/15 p-4 shadow-lg sm:p-6">
           <Tabs defaultValue="login">
-            <TabsList className="grid grid-cols-3 w-full">
-              <TabsTrigger value="login">
+            <TabsList className="grid w-full grid-cols-3 bg-brand-blue-light/70">
+              <TabsTrigger
+                value="login"
+                className="text-brand-blue-dark data-[state=active]:bg-brand-blue data-[state=active]:text-white"
+              >
                 <LogIn className="w-4 h-4 mr-1" /> Ingresar
               </TabsTrigger>
-              <TabsTrigger value="passenger">
+              <TabsTrigger
+                value="passenger"
+                className="text-brand-blue-dark data-[state=active]:bg-brand-blue data-[state=active]:text-white"
+              >
                 <UserPlus className="w-4 h-4 mr-1" /> Pasajero
               </TabsTrigger>
-              <TabsTrigger value="driver">
+              <TabsTrigger
+                value="driver"
+                className="text-brand-blue-dark data-[state=active]:bg-brand-blue data-[state=active]:text-white"
+              >
                 <Bus className="w-4 h-4 mr-1" /> Chofer
               </TabsTrigger>
             </TabsList>
@@ -99,8 +115,25 @@ function LoginForm() {
         if (!data) throw new Error("Teléfono no registrado");
         email = data as string;
       }
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+
+      const { data: staff, error: statusError } = await supabase
+        .from("admins_supervisors")
+        .select("status")
+        .eq("id", signInData.user.id)
+        .maybeSingle();
+
+      if (statusError) {
+        await supabase.auth.signOut();
+        throw new Error("No se pudo verificar el estado de la cuenta. Inténtalo nuevamente.");
+      }
+
+      if (String(staff?.status ?? "").trim().toLowerCase() === "suspended") {
+        await supabase.auth.signOut();
+        throw new Error("Tu cuenta está suspendida. Contacta al administrador.");
+      }
+
       toast.success("Sesión iniciada");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al iniciar sesión");
@@ -117,6 +150,7 @@ function LoginForm() {
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
           placeholder="tu@correo.com o 70000000"
+          className="focus-visible:ring-brand-orange"
           required
         />
       </div>
@@ -128,14 +162,14 @@ function LoginForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            className="pr-10"
+            className="pr-10 focus-visible:ring-brand-orange"
             required
           />
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="absolute right-0 top-0"
+            className="absolute right-0 top-0 text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
             aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
             aria-pressed={showPassword}
             onClick={() => setShowPassword((visible) => !visible)}
@@ -144,7 +178,11 @@ function LoginForm() {
           </Button>
         </div>
       </div>
-      <Button type="submit" disabled={busy} className="w-full">
+      <Button
+        type="submit"
+        disabled={busy}
+        className="w-full bg-brand-blue text-white hover:bg-brand-blue-dark focus-visible:ring-brand-orange"
+      >
         {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Iniciar Sesión
       </Button>
     </form>

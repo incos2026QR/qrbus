@@ -256,7 +256,7 @@ export function PassengerRegister() {
           type="button"
           variant="outline"
           onClick={autofill}
-          className="w-full border-primary text-primary"
+          className="w-full border-brand-blue text-brand-blue hover:bg-brand-blue-light"
         >
           <Sparkles className="w-4 h-4 mr-2" /> Cargar Datos de Prueba
         </Button>
@@ -268,7 +268,7 @@ export function PassengerRegister() {
         {[1, 2, 3, 4].map((i) => (
           <div
             key={i}
-            className={`h-1.5 flex-1 rounded ${s.step >= i ? "bg-primary" : "bg-muted"}`}
+            className={`h-1.5 flex-1 rounded ${s.step >= i ? "bg-brand-blue" : "bg-muted"}`}
           />
         ))}
       </div>
@@ -401,18 +401,28 @@ export function PassengerRegister() {
           <Button
             type="button"
             variant="outline"
+            className="border-brand-blue text-brand-blue hover:bg-brand-blue-light"
             onClick={() => setS({ ...s, step: (s.step - 1) as FormState["step"] })}
           >
             Atrás
           </Button>
         )}
         {s.step < 4 && (
-          <Button type="button" onClick={next} className="ml-auto">
+          <Button
+            type="button"
+            onClick={next}
+            className="ml-auto bg-brand-orange text-brand-ink hover:bg-brand-orange-dark"
+          >
             Siguiente
           </Button>
         )}
         {s.step === 4 && (
-          <Button type="button" onClick={submit} disabled={busy} className="ml-auto">
+          <Button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="ml-auto bg-brand-orange text-brand-ink hover:bg-brand-orange-dark"
+          >
             {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Registrarme
           </Button>
         )}

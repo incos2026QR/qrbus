@@ -38,10 +38,24 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-oled: var(--oled);
   --color-oled-glow: var(--oled-glow);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-blue-dark: var(--brand-blue-dark);
+  --color-brand-blue-light: var(--brand-blue-light);
+  --color-brand-orange: var(--brand-orange);
+  --color-brand-orange-dark: var(--brand-orange-dark);
+  --color-brand-orange-light: var(--brand-orange-light);
+  --color-brand-ink: var(--brand-ink);
 }
 
 :root {
   --radius: 0.65rem;
+  --brand-blue: #0758a5;
+  --brand-blue-dark: #064783;
+  --brand-blue-light: #dcecff;
+  --brand-orange: #ff8300;
+  --brand-orange-dark: #e56f00;
+  --brand-orange-light: #fff0df;
+  --brand-ink: #111827;
   --background: oklch(0.98 0.006 80);
   --foreground: oklch(0.2 0.02 60);
   --card: oklch(1 0 0);

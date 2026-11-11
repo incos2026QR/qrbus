@@ -94,6 +94,36 @@ CREATE TABLE public.admins_supervisors (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE OR REPLACE FUNCTION public.sync_supervisor_auth_suspension()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.role = 'supervisor' THEN
+    UPDATE auth.users
+    SET banned_until = CASE
+      WHEN lower(COALESCE(NEW.status, '')) = 'suspended'
+        THEN now() + interval '100 years'
+      ELSE NULL
+    END
+    WHERE id = NEW.id;
+  ELSIF TG_OP = 'UPDATE' AND OLD.role = 'supervisor' THEN
+    UPDATE auth.users
+    SET banned_until = NULL
+    WHERE id = NEW.id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.sync_supervisor_auth_suspension()
+FROM PUBLIC, anon, authenticated;
+CREATE TRIGGER trg_sync_supervisor_auth_suspension
+AFTER INSERT OR UPDATE OF role, status ON public.admins_supervisors
+FOR EACH ROW EXECUTE FUNCTION public.sync_supervisor_auth_suspension();
+
 GRANT SELECT, UPDATE ON public.passengers, public.drivers TO authenticated;
 GRANT SELECT, UPDATE ON public.admins_supervisors TO authenticated;
 GRANT ALL ON public.passengers, public.drivers, public.admins_supervisors TO service_role;
@@ -210,7 +240,10 @@ SELECT id, 'driver', status, first_name, paternal_surname, maternal_surname,
 FROM public.drivers
 UNION ALL
 SELECT id, role::text::public.app_role,
-       CASE WHEN status = 'suspended' THEN 'suspended'::public.user_status ELSE 'active'::public.user_status END,
+       CASE
+         WHEN lower(COALESCE(status, '')) = 'suspended' THEN 'suspended'::public.user_status
+         ELSE 'active'::public.user_status
+       END,
        first_name, paternal_surname, NULL,
        NULL, NULL, phone, email, NULL, NULL, NULL, NULL, NULL, 0,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, created_at
@@ -245,7 +278,10 @@ BEGIN
   ELSE
     UPDATE public.admins_supervisors SET first_name = NEW.first_name,
       paternal_surname = NEW.paternal_surname, phone = NEW.phone,
-      status = CASE WHEN NEW.status = 'suspended' THEN 'suspended' ELSE 'active' END
+      status = CASE
+        WHEN lower(COALESCE(NEW.status, '')) = 'suspended' THEN 'suspended'
+        ELSE 'active'
+      END
     WHERE id = OLD.id;
   END IF;
   RETURN NEW;

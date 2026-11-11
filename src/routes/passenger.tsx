@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useSession } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
 import { STATUS_LABELS, isActiveStatus, isBlockedStatus, type Category } from "@/lib/categories";
@@ -69,7 +70,89 @@ type MyTx = {
   tickets: number;
   created_at: string;
   amount: number;
+  fare_breakdown?: Json | null;
 };
+
+type FareBreakdownItem = {
+  category: string;
+  tickets: number;
+  amount: number;
+  kind: "titular" | "acompanante";
+};
+
+function isFareBreakdownItem(value: Json): value is FareBreakdownItem {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return (
+    typeof value.category === "string" &&
+    typeof value.tickets === "number" &&
+    typeof value.amount === "number" &&
+    (value.kind === "titular" || value.kind === "acompanante")
+  );
+}
+
+function FareBreakdown({
+  transaction,
+  nombre,
+  hideAmounts,
+}: {
+  transaction: MyTx;
+  nombre: (category: string) => string;
+  hideAmounts: boolean;
+}) {
+  const items = Array.isArray(transaction.fare_breakdown)
+    ? transaction.fare_breakdown.filter(isFareBreakdownItem)
+    : [];
+  const holder = items.find((item) => item.kind === "titular");
+  const companions = items.filter((item) => item.kind === "acompanante");
+  const amountLabel = (amount: number) =>
+    hideAmounts ? "••••" : `Bs ${Number(amount).toFixed(2)}`;
+
+  return (
+    <div className="mt-3 w-full max-w-sm rounded-lg border border-brand-blue/15 bg-card/90 p-3 text-left">
+      <div className="space-y-2">
+        {holder || companions.length > 0 ? (
+          <>
+            {holder && (
+              <div className="flex items-start justify-between gap-3 text-sm">
+                <span>Titular {nombre(holder.category)}</span>
+                <span className="shrink-0 font-medium tabular-nums">
+                  {amountLabel(holder.amount)}
+                </span>
+              </div>
+            )}
+            {companions.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Acompañantes:</p>
+                {companions.map((item, index) => (
+                  <div
+                    key={`${item.category}-${index}`}
+                    className="flex items-start justify-between gap-3 text-sm"
+                  >
+                    <span>
+                      {item.tickets > 1 ? `${item.tickets} ` : ""}
+                      {nombre(item.category)}
+                    </span>
+                    <span className="shrink-0 font-medium tabular-nums">
+                      {amountLabel(item.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Detalle por tipo no disponible para este pago.
+          </p>
+        )}
+      </div>
+      <div className="mt-2 flex justify-between gap-3 border-t pt-2 text-sm font-bold">
+        <span>Total pagado</span>
+        <span className="shrink-0 tabular-nums">{amountLabel(transaction.amount)}</span>
+      </div>
+    </div>
+  );
+}
 
 function PassengerPage() {
   const { profile, userId, loading, refresh } = useSession();
@@ -87,6 +170,7 @@ function PassengerPage() {
     items: { category: string; amount: number; count: number }[];
   } | null>(null);
   const [history, setHistory] = useState<MyTx[]>([]);
+  const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
   const [hideBalance, setHideBalance] = useState(true);
   const [hideAmounts, setHideAmounts] = useState(true);
 
@@ -113,7 +197,7 @@ function PassengerPage() {
     if (!userId) return;
     const { data } = await supabase
       .from("transactions")
-      .select("id, verification_code, tickets, created_at, amount")
+      .select("id, verification_code, tickets, created_at, amount, fare_breakdown")
       .eq("passenger_id", userId)
       .order("created_at", { ascending: false })
       .limit(15);
@@ -274,8 +358,8 @@ function PassengerPage() {
 
   if (!isActiveStatus(profile.status)) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-background">
-        <Card className="p-6 max-w-md w-full text-center space-y-3">
+      <div className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-brand-blue-light/40 via-background to-brand-orange-light/30">
+        <Card className="max-w-md w-full space-y-3 border-brand-blue/15 p-6 text-center">
           <h2 className="text-xl font-bold">
             Cuenta: {STATUS_LABELS[String(profile.status).toLowerCase()] ?? profile.status}
           </h2>
@@ -286,7 +370,7 @@ function PassengerPage() {
             <ResubmitDocs profile={profile} docs={PASSENGER_DOCS} onDone={refresh} />
           )}
           <Button
-            className="w-full"
+            className="w-full border-brand-blue text-brand-blue hover:bg-brand-blue-light"
             variant="outline"
             onClick={async () => {
               await supabase.auth.signOut();
@@ -302,7 +386,7 @@ function PassengerPage() {
 
   if (pass) {
     return (
-      <div className="fixed inset-0 bg-background flex flex-col items-center justify-center p-6 overflow-auto">
+      <div className="fixed inset-0 flex flex-col items-center justify-center overflow-auto bg-gradient-to-br from-brand-blue-light/40 via-background to-brand-orange-light/30 p-6">
         <div className="text-center max-w-sm w-full">
           <p className="text-sm text-muted-foreground uppercase tracking-widest">
             Código de Validación
@@ -314,13 +398,13 @@ function PassengerPage() {
             <img
               src={pass.selfieUrl}
               alt="Selfie con CI del pasajero"
-              className="w-40 h-40 object-cover rounded-full mx-auto border-4 border-primary shadow-lg"
+              className="mx-auto h-40 w-40 rounded-full border-4 border-brand-orange object-cover shadow-lg"
             />
           )}
           <div className="mt-5 text-2xl font-bold">
             {pass.items.length} {pass.items.length === 1 ? "Pasaje pagado" : "Pasajes pagados"}
           </div>
-          <div className="mt-3 rounded-md border p-3 text-left space-y-2">
+          <div className="mt-3 space-y-2 rounded-md border border-brand-blue/15 bg-card/90 p-3 text-left">
             <div className="flex justify-between gap-3 text-sm">
               <span>{pass.items[0].category}</span>
               <span className="shrink-0">Bs {pass.items[0].amount.toFixed(2)}</span>
@@ -347,8 +431,7 @@ function PassengerPage() {
             Muestra este código al chofer para validar el pago.
           </p>
           <Button
-            className="mt-5 w-full"
-            variant="outline"
+            className="mt-5 w-full bg-brand-blue text-white hover:bg-brand-blue-dark focus-visible:ring-brand-orange"
             onClick={() => {
               setPass(null);
               setDriver(null);
@@ -365,19 +448,25 @@ function PassengerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 max-w-md mx-auto">
+    <div className="mx-auto min-h-screen max-w-md bg-gradient-to-b from-brand-blue-light/40 via-background to-brand-orange-light/30 p-4">
       {tarifasError && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive mb-2">
           No se pudieron cargar las tarifas. Intenta nuevamente más tarde.
         </div>
       )}
-      <header className="flex items-center justify-between py-3">
+      <header className="flex items-center justify-between border-b border-brand-blue/15 py-3">
         <div>
           <h1 className="font-bold text-lg">Hola, {profile.first_name}</h1>
           <p className="text-xs text-muted-foreground">Pasajero activo</p>
         </div>
         <div className="flex gap-1">
-          <Button size="sm" variant="ghost" asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
+            asChild
+            aria-label="Reportes"
+          >
             <Link to="/reportes">
               <Flag className="w-4 h-4" />
             </Link>
@@ -385,6 +474,7 @@ function PassengerPage() {
           <Button
             size="sm"
             variant="ghost"
+            className="text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
             onClick={async () => {
               await supabase.auth.signOut();
               navigate({ to: "/" });
@@ -396,7 +486,7 @@ function PassengerPage() {
       </header>
 
       {/* 1. Scanner / código manual */}
-      <Card className="p-5 space-y-4">
+      <Card className="space-y-4 border-brand-blue/15 p-5 shadow-md">
         {!driver && (
           <>
             {scanning ? (
@@ -408,7 +498,10 @@ function PassengerPage() {
                 onCancel={() => setScanning(false)}
               />
             ) : (
-              <Button className="w-full h-14 text-base" onClick={() => setScanning(true)}>
+              <Button
+                className="h-14 w-full bg-brand-blue text-base text-white hover:bg-brand-blue-dark"
+                onClick={() => setScanning(true)}
+              >
                 <ScanLine className="w-5 h-5 mr-2" /> Escanear QR del chofer
               </Button>
             )}
@@ -424,7 +517,11 @@ function PassengerPage() {
                   placeholder="DRV84"
                   className="text-center text-2xl font-bold tracking-widest uppercase"
                 />
-                <Button variant="secondary" onClick={() => findDriver(code)}>
+                <Button
+                  variant="outline"
+                  className="border-brand-blue text-brand-blue hover:bg-brand-blue-light"
+                  onClick={() => findDriver(code)}
+                >
                   Buscar
                 </Button>
               </div>
@@ -442,7 +539,7 @@ function PassengerPage() {
               ({driver.driver_code})
             </p>
 
-            <div className="rounded-lg border p-4 space-y-3">
+            <div className="space-y-3 rounded-lg border border-brand-blue/15 bg-card/80 p-4">
               <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-2">
                 <Users className="w-3 h-3" /> Pasajeros vinculados (acompañantes)
               </p>
@@ -473,7 +570,7 @@ function PassengerPage() {
                   <Button
                     size="icon"
                     variant="outline"
-                    className="shrink-0"
+                    className="shrink-0 border-brand-blue/20 text-brand-blue hover:bg-brand-blue-light"
                     aria-label={`Agregar pasajero ${nombre(category)}`}
                     disabled={tickets >= 10}
                     onClick={() =>
@@ -491,7 +588,7 @@ function PassengerPage() {
                   <Button
                     size="icon"
                     variant="outline"
-                    className="shrink-0"
+                    className="shrink-0 border-brand-blue/20 text-brand-blue hover:bg-brand-blue-light"
                     aria-label={`Quitar pasajero ${nombre(category)}`}
                     onClick={() =>
                       setCompanions((arr) => {
@@ -507,7 +604,7 @@ function PassengerPage() {
 
               <Button
                 variant="outline"
-                className="w-full"
+                className="w-full border-brand-blue text-brand-blue hover:bg-brand-blue-light"
                 disabled={tickets >= 10 || availableCompanionCategories.length === 0}
                 onClick={addCompanion}
               >
@@ -550,7 +647,7 @@ function PassengerPage() {
             <Button
               onClick={confirmPayment}
               disabled={busy || balance < total}
-              className="w-full h-12 text-base"
+              className="h-12 w-full bg-brand-blue text-base text-white hover:bg-brand-blue-dark focus-visible:ring-brand-orange"
             >
               {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Confirmar Pago (Bs {total.toFixed(2)})
@@ -571,7 +668,7 @@ function PassengerPage() {
       </Card>
 
       {/* 2. Billetera virtual */}
-      <Card className="p-5 mt-4 bg-gradient-to-br from-primary/15 to-accent">
+      <Card className="mt-4 border-brand-blue/15 bg-gradient-to-br from-brand-blue-light to-brand-orange-light p-5 shadow-md">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
             <Wallet className="w-4 h-4" /> Saldo Pago Justo
@@ -579,7 +676,7 @@ function PassengerPage() {
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7"
+            className="h-7 w-7 text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
             aria-label={hideBalance ? "Mostrar saldo" : "Ocultar saldo"}
             onClick={() => setHideBalance((v) => !v)}
           >
@@ -591,7 +688,7 @@ function PassengerPage() {
         </div>
         <Dialog open={topupOpen} onOpenChange={setTopupOpen}>
           <DialogTrigger asChild>
-            <Button className="w-full">
+            <Button className="w-full bg-brand-blue text-white hover:bg-brand-blue-dark focus-visible:ring-brand-orange">
               <Plus className="w-4 h-4 mr-2" /> Cargar Saldo
             </Button>
           </DialogTrigger>
@@ -617,14 +714,14 @@ function PassengerPage() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="flex-1"
+                    className="flex-1 border-brand-blue/20 text-brand-blue hover:bg-brand-blue-light"
                     onClick={() => setTopupAmount(String(v))}
                   >
                     Bs {v}
                   </Button>
                 ))}
               </div>
-              <div className="bg-white rounded-lg border p-3 text-center">
+              <div className="rounded-lg border border-brand-blue/15 bg-white p-3 text-center">
                 {topupQr ? (
                   <img src={topupQr} alt="QR de recarga" className="mx-auto w-44 h-44" />
                 ) : (
@@ -634,7 +731,11 @@ function PassengerPage() {
                   Escanea con Yape / Tigo Money / Banca Móvil
                 </p>
               </div>
-              <Button className="w-full" onClick={doTopup} disabled={topupBusy}>
+              <Button
+                className="w-full bg-brand-blue text-white hover:bg-brand-blue-dark focus-visible:ring-brand-orange"
+                onClick={doTopup}
+                disabled={topupBusy}
+              >
                 {topupBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Simular pago y
                 acreditar
               </Button>
@@ -643,7 +744,7 @@ function PassengerPage() {
         </Dialog>
       </Card>
 
-      <Card className="p-4 mt-4">
+      <Card className="mt-4 border-brand-blue/15 p-4 shadow-md">
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-semibold flex items-center gap-2 text-sm">
             <History className="w-4 h-4" /> Mis transacciones
@@ -651,7 +752,7 @@ function PassengerPage() {
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7"
+            className="h-7 w-7 text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
             aria-label={hideAmounts ? "Mostrar montos" : "Ocultar montos"}
             onClick={() => setHideAmounts((v) => !v)}
           >
@@ -660,17 +761,48 @@ function PassengerPage() {
         </div>
         <div className="divide-y text-sm">
           {history.map((t) => (
-            <div key={t.id} className="py-2 flex justify-between items-center gap-2">
-              <span className="font-mono">{t.verification_code}</span>
-              <span>
-                {Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}
-              </span>
-              <span className="font-semibold tabular-nums">
-                {hideAmounts ? "••••" : `Bs ${Number(t.amount ?? 0).toFixed(2)}`}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {new Date(t.created_at).toLocaleString()}
-              </span>
+            <div key={t.id} className="py-2">
+              <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-2 gap-y-1 sm:flex sm:justify-between">
+                <span className="font-mono">{t.verification_code}</span>
+                <span>
+                  {Number(t.tickets ?? 1)} pasaje{Number(t.tickets ?? 1) > 1 ? "s" : ""}
+                </span>
+                <span className="col-start-1 row-start-2 font-semibold tabular-nums sm:row-auto">
+                  {hideAmounts ? "••••" : `Bs ${Number(t.amount ?? 0).toFixed(2)}`}
+                </span>
+                <span
+                  className="col-span-2 row-start-2 min-w-0 truncate text-xs text-muted-foreground sm:row-auto"
+                  title={new Date(t.created_at).toLocaleString()}
+                >
+                  {new Date(t.created_at).toLocaleString()}
+                </span>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="col-start-3 row-start-1 h-7 w-7 shrink-0 border-brand-blue/20 text-brand-blue hover:bg-brand-blue-light sm:row-auto"
+                  aria-label={
+                    expandedTransactionId === t.id
+                      ? `Ocultar desglose del pago ${t.verification_code}`
+                      : `Ver desglose del pago ${t.verification_code}`
+                  }
+                  aria-expanded={expandedTransactionId === t.id}
+                  onClick={() =>
+                    setExpandedTransactionId((current) => (current === t.id ? null : t.id))
+                  }
+                >
+                  {expandedTransactionId === t.id ? (
+                    <Minus className="h-4 w-4" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              {expandedTransactionId === t.id && (
+                <div className="pl-1">
+                  <FareBreakdown transaction={t} nombre={nombre} hideAmounts={hideAmounts} />
+                </div>
+              )}
             </div>
           ))}
           {history.length === 0 && (

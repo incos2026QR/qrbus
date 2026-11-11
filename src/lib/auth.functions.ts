@@ -49,18 +49,37 @@ async function upsertRoleRow(admin: any, role: string, row: Record<string, unkno
 async function requireAdmin(admin: any) {
   const authorization = getRequest().headers.get("authorization");
   const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
-  if (!token) throw new Error("No autorizado");
 
-  const { data: authData, error: authError } = await admin.auth.getUser(token);
-  if (authError || !authData.user) throw new Error("No autorizado");
+  let userId: string | null = null;
+
+  if (token) {
+    const { data: authData, error: authError } = await admin.auth.getUser(token);
+    if (!authError && authData.user) userId = authData.user.id;
+  }
+
+  if (!userId) {
+    const { data: sessionData } = await admin.auth.getSession();
+    userId = sessionData.session?.user.id ?? null;
+  }
+
+  if (!userId) throw new Error("No autorizado");
 
   const { data: role } = await admin
     .from("user_roles")
     .select("user_id")
-    .eq("user_id", authData.user.id)
+    .eq("user_id", userId)
     .eq("role", "admin")
     .maybeSingle();
-  if (!role) throw new Error("Se requiere rol de administrador");
+
+  if (!role) {
+    const { data: staffRow } = await admin
+      .from("admins_supervisors")
+      .select("id")
+      .eq("id", userId)
+      .eq("role", "admin")
+      .maybeSingle();
+    if (!staffRow) throw new Error("Se requiere rol de administrador");
+  }
 }
 
 const setRoleSchema = z.object({

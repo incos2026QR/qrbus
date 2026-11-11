@@ -412,7 +412,7 @@ function DriverPage() {
   if (!isActiveStatus(profile.status)) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
-        <Card className="p-6 max-w-md w-full space-y-3">
+        <Card className="max-w-md w-full space-y-3 border-brand-blue/15 p-6">
           <h2 className="text-xl font-bold text-center">
             Cuenta: {STATUS_LABELS[String(profile.status).toLowerCase()] ?? profile.status}
           </h2>
@@ -428,8 +428,8 @@ function DriverPage() {
             <ResubmitDocs profile={profile} docs={DRIVER_DOCS} onDone={refresh} />
           )}
           <Button
-            className="w-full"
             variant="outline"
+            className="w-full border-brand-blue text-brand-blue hover:bg-brand-blue-light"
             onClick={async () => {
               await supabase.auth.signOut();
               navigate({ to: "/" });
@@ -450,7 +450,7 @@ function DriverPage() {
 
 
   return (
-    <div className="min-h-screen bg-background p-4 max-w-2xl mx-auto space-y-4 relative">
+    <div className="relative mx-auto min-h-screen max-w-2xl space-y-4 bg-gradient-to-b from-brand-blue-light/40 via-background to-brand-orange-light/30 p-4">
       {/* Full-screen success overlay */}
       {flash && (
         <div className="fixed inset-0 z-50 flex min-h-full flex-col items-center justify-start overflow-y-auto bg-black p-6 py-8 text-center sm:justify-center">
@@ -472,7 +472,7 @@ function DriverPage() {
         </div>
       )}
 
-      <header className="flex items-center justify-between gap-2 py-2 sticky top-0 z-30 bg-background/90 backdrop-blur border-b">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-brand-blue/15 bg-background/90 py-2 backdrop-blur">
         <div className="min-w-0">
           <p className="text-xs uppercase text-muted-foreground">Chofer</p>
           <h1 className="font-bold truncate">
@@ -486,6 +486,7 @@ function DriverPage() {
               <Button
                 size="icon"
                 variant="ghost"
+                className="text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
                 aria-label="Enlazar tablero de hardware"
                 title={btName ? `Hardware enlazado: ${btName}` : "Enlazar hardware"}
               >
@@ -507,7 +508,11 @@ function DriverPage() {
                     {btName ? `Conectado (${btName})` : "Desconectado"}
                   </span>
                 </p>
-                <Button className="w-full" onClick={linkBluetooth} disabled={btBusy}>
+                <Button
+                  className="w-full bg-brand-orange text-brand-ink hover:bg-brand-orange-dark"
+                  onClick={linkBluetooth}
+                  disabled={btBusy}
+                >
                   {btBusy ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   ) : (
@@ -522,7 +527,12 @@ function DriverPage() {
           {/* Driver QR */}
           <Dialog open={qrOpen} onOpenChange={setQrOpen}>
             <DialogTrigger asChild>
-              <Button size="icon" variant="ghost" aria-label="Ver mi código QR">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
+                aria-label="Ver mi código QR"
+              >
                 <QrCode className="w-5 h-5" />
               </Button>
             </DialogTrigger>
@@ -531,11 +541,11 @@ function DriverPage() {
                 <DialogTitle>Mi código de chofer</DialogTitle>
               </DialogHeader>
               <div className="text-center space-y-3">
-                <div className="text-5xl font-black text-primary tracking-widest">
+                <div className="text-5xl font-black tracking-widest text-brand-orange-dark">
                   {profile.driver_code}
                 </div>
                 {codeQr && (
-                  <div className="bg-white p-3 rounded-lg inline-block border">
+                  <div className="inline-block rounded-lg border border-brand-blue/15 bg-white p-3">
                     <img
                       src={codeQr}
                       alt={`QR del chofer ${profile.driver_code}`}
@@ -546,7 +556,11 @@ function DriverPage() {
                 <p className="text-xs text-muted-foreground">
                   Los pasajeros escanean este QR (o tipean el código) para pagar
                 </p>
-                <Button className="w-full" onClick={downloadQr} disabled={!codeQr}>
+                <Button
+                  className="w-full bg-brand-blue text-white hover:bg-brand-blue-dark focus-visible:ring-brand-orange"
+                  onClick={downloadQr}
+                  disabled={!codeQr}
+                >
                   <Download className="w-4 h-4 mr-2" /> Descargar QR
                 </Button>
               </div>
@@ -598,7 +612,7 @@ function DriverPage() {
                     type="button"
                     variant="link"
                     size="sm"
-                    className="px-0"
+                    className="px-0 text-brand-blue hover:text-brand-orange-dark"
                     onClick={() => setWAmount(balance.toFixed(2))}
                   >
                     Retirar todo
@@ -617,7 +631,7 @@ function DriverPage() {
                   )}
                 </div>
                 <Button
-                  className="w-full"
+                  className="w-full bg-brand-orange text-brand-ink hover:bg-brand-orange-dark"
                   onClick={doWithdraw}
                   disabled={
                     wBusy ||
@@ -635,7 +649,13 @@ function DriverPage() {
 
 
 
-          <Button size="icon" variant="ghost" asChild aria-label="Reportes">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
+            asChild
+            aria-label="Reportes"
+          >
             <Link to="/reportes">
               <Flag className="w-5 h-5" />
             </Link>
@@ -644,6 +664,7 @@ function DriverPage() {
           <Button
             size="icon"
             variant="ghost"
+            className="text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
             aria-label="Cerrar sesión"
             onClick={async () => {
               await supabase.auth.signOut();
@@ -678,7 +699,7 @@ function DriverPage() {
       )}
 
       {/* 2. Validaciones recientes */}
-      <Card className="p-4">
+      <Card className="border-brand-blue/15 p-4 shadow-md">
         <div className="flex items-center justify-between gap-2 mb-2">
           <h3 className="font-semibold">Validaciones recientes</h3>
           <div className="flex items-center gap-1">
@@ -687,7 +708,11 @@ function DriverPage() {
                 key={v}
                 size="sm"
                 variant={showCount === v ? "default" : "outline"}
-                className="h-7 px-2 text-xs"
+                className={`h-7 px-2 text-xs ${
+                  showCount === v
+                    ? "bg-brand-orange text-brand-ink hover:bg-brand-orange-dark"
+                    : "border-brand-blue/20 text-brand-blue hover:bg-brand-blue-light"
+                }`}
                 onClick={() => setShowCount(v)}
               >
                 {v === "all" ? "Todas" : v}
@@ -710,7 +735,7 @@ function DriverPage() {
                   type="button"
                   size="icon"
                   variant="outline"
-                  className="h-7 w-7 shrink-0"
+                  className="h-7 w-7 shrink-0 border-brand-blue/20 text-brand-blue hover:bg-brand-blue-light"
                   aria-label={
                     expandedTransactionId === t.id
                       ? `Ocultar desglose del pago ${t.verification_code}`
@@ -742,7 +767,7 @@ function DriverPage() {
       </Card>
 
       {/* 3. Métricas consolidadas (abajo, por privacidad) */}
-      <Card className="p-5 space-y-4">
+      <Card className="space-y-4 border-brand-blue/15 p-5 shadow-md">
         <div className="flex items-start justify-between gap-2">
           <div>
             <p className="text-xs uppercase tracking-widest text-muted-foreground">Total recaudado hoy</p>
@@ -751,6 +776,7 @@ function DriverPage() {
           <Button
             size="icon"
             variant="ghost"
+            className="text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
             aria-label={hideMoney ? "Mostrar montos" : "Ocultar montos"}
             onClick={() => setHideMoney((v) => !v)}
           >
@@ -759,13 +785,13 @@ function DriverPage() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-lg border p-3">
+          <div className="rounded-lg border border-brand-blue/15 bg-card/80 p-3">
             <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
               <Wallet className="w-4 h-4" /> Saldo Acumulado
             </div>
             <div className="text-2xl font-bold mt-1">{money(balance)}</div>
           </div>
-          <div className="rounded-lg border p-3">
+          <div className="rounded-lg border border-brand-blue/15 bg-card/80 p-3">
             <div className="text-xs uppercase tracking-widest text-muted-foreground">
               Pasajes Hoy
             </div>

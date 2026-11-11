@@ -75,7 +75,7 @@ export function QrScanner({ onResult, onCancel }: Props) {
       <div className="relative overflow-hidden rounded-xl border bg-black aspect-square max-w-full">
         <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
         <canvas ref={canvasRef} className="hidden" />
-        <div className="pointer-events-none absolute inset-8 border-2 border-primary rounded-lg" />
+        <div className="pointer-events-none absolute inset-8 rounded-lg border-2 border-brand-orange" />
         {starting && (
           <div className="absolute inset-0 grid place-items-center text-primary-foreground">
             <Loader2 className="w-6 h-6 animate-spin" />
@@ -90,7 +90,11 @@ export function QrScanner({ onResult, onCancel }: Props) {
           </div>
         )}
       </div>
-      <Button variant="outline" className="w-full" onClick={onCancel}>
+      <Button
+        variant="outline"
+        className="w-full border-brand-blue text-brand-blue hover:bg-brand-blue-light"
+        onClick={onCancel}
+      >
         Cancelar
       </Button>
     </div>

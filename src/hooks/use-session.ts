@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export type Profile = {
   id: string;
@@ -41,9 +42,49 @@ export function useSession() {
   useEffect(() => {
     let mounted = true;
     async function loadProfile(uid: string) {
-      const { data } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
       if (!mounted) return;
-      setProfile((data as Profile | null) ?? null);
+      if (error) {
+        console.error("[Auth] Could not load the signed-in user's profile", error);
+        toast.error("No se pudo verificar tu cuenta. Vuelve a iniciar sesión.");
+        setProfile(null);
+        setMissingProfile(false);
+        await supabase.auth.signOut();
+        return;
+      }
+
+      let loadedProfile = (data as Profile | null) ?? null;
+      if (loadedProfile?.role === "admin" || loadedProfile?.role === "supervisor") {
+        const { data: staff, error: staffError } = await supabase
+          .from("admins_supervisors")
+          .select("role, status")
+          .eq("id", uid)
+          .maybeSingle();
+
+        if (!mounted) return;
+        if (staffError || !staff) {
+          console.error(
+            "[Auth] Could not verify the signed-in staff member's status",
+            staffError ?? new Error("Staff account not found"),
+          );
+          toast.error("No se pudo verificar el estado de tu cuenta. Vuelve a iniciar sesión.");
+          setProfile(null);
+          setMissingProfile(false);
+          await supabase.auth.signOut();
+          return;
+        }
+
+        loadedProfile = {
+          ...loadedProfile,
+          role: staff.role,
+          status:
+            String(staff.status).trim().toLowerCase() === "suspended"
+              ? "suspended"
+              : loadedProfile.status,
+        };
+      }
+
+      setProfile(loadedProfile);
       setMissingProfile(!data);
     }
 
@@ -59,7 +100,10 @@ export function useSession() {
       const uid = session?.user.id ?? null;
       setUserId(uid);
       if (uid) loadProfile(uid);
-      else setProfile(null);
+      else {
+        setProfile(null);
+        setMissingProfile(false);
+      }
     });
     return () => { mounted = false; sub.subscription.unsubscribe(); };
   }, []);
