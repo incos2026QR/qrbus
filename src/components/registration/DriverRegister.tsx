@@ -17,6 +17,17 @@ import { cleanAccount, formatAccount, createAccount } from "@/lib/bank";
 import { useBancos, useLineasTransporte } from "@/lib/catalogs";
 import { Captcha } from "@/components/Captcha";
 import { FilePick } from "./PassengerRegister";
+import {
+  cleanBolivianPhoneInput,
+  cleanCiNumber,
+  cleanPersonName,
+  isValidBankAccount,
+  isValidBirthdate,
+  isValidOptionalEmail,
+  normalizeBolivianPhone,
+  normalizePersonName,
+  todayDateInputValue,
+} from "@/lib/registration-validation";
 
 type State = {
   phone: string;
@@ -89,18 +100,36 @@ export function DriverRegister() {
       { key: "union_doc", label: "la credencial de línea / carnet de sindicato" },
     ];
     for (const n of need) if (!s.files[n.key]) return toast.error(`Falta ${n.label}`);
-    if (!s.phone || !s.password || !s.first_name || !s.ci_number || !s.birthdate)
-      return toast.error("Completa todos los datos");
+    const phone = normalizeBolivianPhone(s.phone);
+    if (!phone)
+      return toast.error(
+        "Ingresa un celular boliviano válido de 8 dígitos que empiece con 5, 6 o 7",
+      );
+    if (!s.password) return toast.error("La contraseña es obligatoria");
+    if (!isValidOptionalEmail(s.email)) return toast.error("Ingresa un correo electrónico válido");
+    if (!normalizePersonName(s.first_name) || !normalizePersonName(s.paternal_surname))
+      return toast.error("Ingresa nombres y apellido paterno usando solo letras");
+    if (s.maternal_surname.trim() && !normalizePersonName(s.maternal_surname))
+      return toast.error("El apellido materno debe contener solo letras");
+    if (!cleanCiNumber(s.ci_number))
+      return toast.error("Ingresa el CI usando letras, números y guion medio");
+    if (!isValidBirthdate(s.birthdate))
+      return toast.error("Ingresa una fecha de nacimiento válida que no sea futura");
     if (!s.transport_line) return toast.error("Selecciona tu línea de micro / transporte");
     if (!s.bank_name) return toast.error("Selecciona tu banco");
     const cuenta = cleanAccount(s.bank_account);
-    if (!cuenta) return toast.error("Ingresa tu número de cuenta (solo dígitos)");
+    if (!cuenta || !isValidBankAccount(s.bank_account))
+      return toast.error("Ingresa tu número de cuenta usando solo dígitos y guion medio");
     const cuentaErr = validarCuenta(s.bank_name, cuenta);
     if (cuentaErr) return toast.error(cuentaErr);
     if (!captchaOk) return toast.error("Completa la verificación humana");
     setBusy(true);
     try {
-      const email = s.email || `${s.phone}@pagojusto.bo`;
+      const email = s.email.trim() || `${phone}@pagojusto.bo`;
+      const firstName = normalizePersonName(s.first_name);
+      const paternalSurname = normalizePersonName(s.paternal_surname);
+      const maternalSurname = normalizePersonName(s.maternal_surname);
+      const ciNumber = cleanCiNumber(s.ci_number);
 
       // 1) Crear el usuario de autenticación
       const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
@@ -110,11 +139,11 @@ export function DriverRegister() {
           emailRedirectTo: window.location.origin,
           data: {
             role: "driver",
-            phone: s.phone,
-            first_name: s.first_name,
-            paternal_surname: s.paternal_surname,
-            maternal_surname: s.maternal_surname,
-            ci_number: s.ci_number,
+            phone,
+            first_name: firstName,
+            paternal_surname: paternalSurname,
+            maternal_surname: maternalSurname,
+            ci_number: ciNumber,
             birthdate: s.birthdate,
             bank_account: cuenta,
             bank_name: s.bank_name,
@@ -158,12 +187,12 @@ export function DriverRegister() {
       const { data: driver, error: pErr } = await (supabase as any)
         .from("drivers")
         .update({
-          first_name: s.first_name,
-          paternal_surname: s.paternal_surname,
-          maternal_surname: s.maternal_surname,
-          ci_number: s.ci_number,
+          first_name: firstName,
+          paternal_surname: paternalSurname,
+          maternal_surname: maternalSurname,
+          ci_number: ciNumber,
           birthdate: s.birthdate,
-          phone: s.phone,
+          phone,
           email,
           bank_account: cuenta,
           bank_name: s.bank_name,
@@ -176,7 +205,7 @@ export function DriverRegister() {
       if (pErr) throw new Error(`No se pudo crear el perfil del chofer: ${pErr.message}`);
 
       try {
-        await createAccount(cuenta, `${s.first_name} ${s.paternal_surname}`.trim(), s.bank_name);
+        await createAccount(cuenta, `${firstName} ${paternalSurname}`.trim(), s.bank_name);
       } catch {
         /* la cuenta ya podría existir en el banco */
       }
@@ -210,7 +239,15 @@ export function DriverRegister() {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <Label>Teléfono *</Label>
-          <Input value={s.phone} onChange={(e) => setS({ ...s, phone: e.target.value })} />
+          <Input
+            type="tel"
+            value={s.phone}
+            onChange={(e) => setS({ ...s, phone: cleanBolivianPhoneInput(e.target.value) })}
+            placeholder="70730586 o +591 (5) 774-0655"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            8 dígitos que empiecen con 5, 6 o 7; se acepta el prefijo +591.
+          </p>
         </div>
         <div>
           <Label>Contraseña *</Label>
@@ -232,31 +269,35 @@ export function DriverRegister() {
           <Label>Nombres *</Label>
           <Input
             value={s.first_name}
-            onChange={(e) => setS({ ...s, first_name: e.target.value })}
+            onChange={(e) => setS({ ...s, first_name: cleanPersonName(e.target.value) })}
           />
         </div>
         <div>
           <Label>Ap. Paterno *</Label>
           <Input
             value={s.paternal_surname}
-            onChange={(e) => setS({ ...s, paternal_surname: e.target.value })}
+            onChange={(e) => setS({ ...s, paternal_surname: cleanPersonName(e.target.value) })}
           />
         </div>
         <div>
           <Label>Ap. Materno</Label>
           <Input
             value={s.maternal_surname}
-            onChange={(e) => setS({ ...s, maternal_surname: e.target.value })}
+            onChange={(e) => setS({ ...s, maternal_surname: cleanPersonName(e.target.value) })}
           />
         </div>
         <div>
           <Label>CI *</Label>
-          <Input value={s.ci_number} onChange={(e) => setS({ ...s, ci_number: e.target.value })} />
+          <Input
+            value={s.ci_number}
+            onChange={(e) => setS({ ...s, ci_number: cleanCiNumber(e.target.value) })}
+          />
         </div>
         <div className="col-span-2">
           <Label>Fecha de nacimiento *</Label>
           <Input
             type="date"
+            max={todayDateInputValue()}
             value={s.birthdate}
             onChange={(e) => setS({ ...s, birthdate: e.target.value })}
           />
@@ -294,10 +335,10 @@ export function DriverRegister() {
         <div className="col-span-2">
           <Label>Número de cuenta *</Label>
           <Input
-            inputMode="numeric"
+            inputMode="text"
             value={s.bank_account}
             onChange={(e) => setS({ ...s, bank_account: cleanAccount(e.target.value) })}
-            placeholder="Ej. 104578"
+            placeholder="Ej. 104578 o 10-4578"
           />
           <p className="text-xs text-muted-foreground mt-1">
             {formatAccount(s.bank_name, s.bank_account)}

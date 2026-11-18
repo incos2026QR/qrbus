@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
@@ -13,8 +13,10 @@ import { playSuccessChime } from "@/lib/sound";
 import { QrScanner } from "@/components/QrScanner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -44,8 +46,10 @@ import {
   Eye,
   EyeOff,
   Users,
+  Star,
 } from "lucide-react";
 import QRCode from "qrcode";
+import { Switch } from "@/components/ui/switch";
 const CATEGORY_OPTIONS: Category[] = [
   "general",
   "primaria",
@@ -53,6 +57,36 @@ const CATEGORY_OPTIONS: Category[] = [
   "adulto_mayor",
   "discapacidad",
 ];
+
+const POSITIVE_RATING_REASONS = [
+  { value: "trato_amable", label: "Trato amable" },
+  { value: "conduccion_segura", label: "Conducción segura" },
+  { value: "cobro_correcto", label: "Cobro correcto" },
+  { value: "respeto_pasaje_diferenciado", label: "Respeto al pasaje diferenciado" },
+  { value: "vehiculo_buen_estado", label: "Vehículo en buenas condiciones" },
+] as const;
+
+const IMPROVEMENT_RATING_REASONS = [
+  { value: "trato_mejorable", label: "El trato podría mejorar" },
+  { value: "conduccion_puede_mejorar", label: "La conducción podría mejorar" },
+  { value: "cobro_puede_mejorar", label: "El cobro podría ser más claro" },
+  {
+    value: "respeto_pasaje_diferenciado_puede_mejorar",
+    label: "Podría mejorar el respeto al pasaje diferenciado",
+  },
+  { value: "vehiculo_requiere_mejoras", label: "El vehículo podría mejorar" },
+] as const;
+
+function getRatingReasons(rating: number) {
+  if (rating === 5) return POSITIVE_RATING_REASONS;
+  return [...POSITIVE_RATING_REASONS, ...IMPROVEMENT_RATING_REASONS];
+}
+
+function getRatingReasonLabel(value: string) {
+  return [...POSITIVE_RATING_REASONS, ...IMPROVEMENT_RATING_REASONS].find(
+    (reason) => reason.value === value,
+  )?.label;
+}
 
 export const Route = createFileRoute("/passenger")({ ssr: false, component: PassengerPage });
 
@@ -71,6 +105,9 @@ type MyTx = {
   created_at: string;
   amount: number;
   fare_breakdown?: Json | null;
+  rating?: number;
+  selected_comments?: string[];
+  comment?: string | null;
 };
 
 type FareBreakdownItem = {
@@ -154,6 +191,56 @@ function FareBreakdown({
   );
 }
 
+function StarRatingInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex items-center" role="group" aria-label="Calificación de media estrella a cinco estrellas">
+      {Array.from({ length: 5 }, (_, index) => {
+        const wholeStar = index + 1;
+        const halfStar = wholeStar - 0.5;
+        const fillWidth = value >= wholeStar ? "100%" : value >= halfStar ? "50%" : "0";
+        return (
+          <span key={wholeStar} className="relative inline-flex h-8 w-8">
+            <Star className="absolute inset-1 h-6 w-6 text-amber-500" />
+            <span
+              className="pointer-events-none absolute inset-y-1 left-1 overflow-hidden text-amber-500"
+              style={{ width: fillWidth }}
+            >
+              <Star className="h-6 w-6 fill-current" />
+            </span>
+            <button
+              type="button"
+              disabled={disabled}
+              className="absolute inset-y-0 left-0 w-1/2 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-blue disabled:cursor-not-allowed"
+              aria-label={`${halfStar} estrellas`}
+              aria-pressed={value === halfStar}
+              onClick={() => onChange(halfStar)}
+            />
+            <button
+              type="button"
+              disabled={disabled}
+              className="absolute inset-y-0 right-0 w-1/2 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-blue disabled:cursor-not-allowed"
+              aria-label={`${wholeStar} ${wholeStar === 1 ? "estrella" : "estrellas"}`}
+              aria-pressed={value === wholeStar}
+              onClick={() => onChange(wholeStar)}
+            />
+          </span>
+        );
+      })}
+      <span className="ml-2 min-w-8 text-sm tabular-nums text-muted-foreground">
+        {value ? `${value.toFixed(1).replace(/\.0$/, "")}/5` : "—"}
+      </span>
+    </div>
+  );
+}
+
 function PassengerPage() {
   const { profile, userId, loading, refresh } = useSession();
   const { precio, nombre, error: tarifasError } = useTarifas();
@@ -161,6 +248,8 @@ function PassengerPage() {
   const [code, setCode] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
   const [companions, setCompanions] = useState<Category[]>([]);
+  const [defaultCompanions, setDefaultCompanions] = useState<Category[]>([]);
+  const [savingDefaults, setSavingDefaults] = useState(false);
   const [scanning, setScanning] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<{
@@ -170,6 +259,12 @@ function PassengerPage() {
     items: { category: string; amount: number; count: number }[];
   } | null>(null);
   const [history, setHistory] = useState<MyTx[]>([]);
+  const [ratingSelections, setRatingSelections] = useState<Record<string, number>>({});
+  const [ratingReasonSelections, setRatingReasonSelections] = useState<
+    Record<string, string[]>
+  >({});
+  const [ratingComments, setRatingComments] = useState<Record<string, string>>({});
+  const [ratingSavingId, setRatingSavingId] = useState<string | null>(null);
   const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
   const [hideBalance, setHideBalance] = useState(true);
   const [hideAmounts, setHideAmounts] = useState(true);
@@ -193,19 +288,75 @@ function PassengerPage() {
       .catch(() => setTopupQr(null));
   }, [topupOpen, topupAmount]);
 
-  async function loadHistory() {
+  const loadHistory = useCallback(async () => {
     if (!userId) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("transactions")
       .select("id, verification_code, tickets, created_at, amount, fare_breakdown")
       .eq("passenger_id", userId)
       .order("created_at", { ascending: false })
       .limit(15);
-    setHistory((data as MyTx[]) ?? []);
-  }
-  useEffect(() => {
-    loadHistory();
+    if (error) {
+      console.error("Error al cargar transacciones:", error);
+      toast.error("No se pudo cargar el historial de transacciones");
+      return;
+    }
+
+    const transactions = data ?? [];
+    if (transactions.length === 0) {
+      setHistory([]);
+      return;
+    }
+
+    const { data: ratings, error: ratingsError } = await supabase
+      .from("transaction_ratings")
+      .select("transaction_id, rating, selected_comments, comment")
+      .in(
+        "transaction_id",
+        transactions.map((transaction) => transaction.id),
+      );
+    if (ratingsError) {
+      console.error("Error al cargar calificaciones:", ratingsError);
+      toast.error("No se pudieron cargar las calificaciones");
+      return;
+    }
+
+    const ratingsByTransaction = new Map((ratings ?? []).map((rating) => [rating.transaction_id, rating]));
+    setHistory(
+      transactions.map((transaction) => ({
+        ...transaction,
+        rating: ratingsByTransaction.has(transaction.id)
+          ? Number(ratingsByTransaction.get(transaction.id)?.rating)
+          : undefined,
+        selected_comments: ratingsByTransaction.get(transaction.id)?.selected_comments ?? [],
+        comment: ratingsByTransaction.get(transaction.id)?.comment ?? null,
+      })),
+    );
   }, [userId]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
+
+  const loadCompanionDefaults = useCallback(async () => {
+    if (!userId) return [];
+    const { data, error } = await supabase
+      .from("passenger_companion_defaults")
+      .select("categories")
+      .eq("passenger_id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    const categories = data?.categories ?? [];
+    setDefaultCompanions(categories);
+    return categories;
+  }, [userId]);
+
+  useEffect(() => {
+    loadCompanionDefaults().catch((error: unknown) => {
+      console.error("Error al cargar acompañantes predeterminados:", error);
+      toast.error("No se pudieron cargar los acompañantes predeterminados");
+    });
+  }, [loadCompanionDefaults]);
 
   const balance = Number(profile?.balance ?? 0);
   const basePrice = precio(profile?.category ?? "general");
@@ -220,9 +371,10 @@ function PassengerPage() {
     },
     [],
   );
-  const availableCompanionCategories = CATEGORY_OPTIONS.filter(
-    (category) => !companions.includes(category),
-  );
+  const companionsMatchDefaults =
+    companions.length > 0 &&
+    companions.length === defaultCompanions.length &&
+    companions.every((category, index) => category === defaultCompanions[index]);
 
   function addCompanion() {
     setCompanions((current) => {
@@ -247,9 +399,81 @@ function PassengerPage() {
       ? (data[0] as DriverInfo | undefined)
       : (data as DriverInfo | null);
     if (error || !row) return toast.error("Chofer no encontrado o no activo");
+    let savedCompanions: Category[];
+    try {
+      savedCompanions = await loadCompanionDefaults();
+    } catch (loadError) {
+      console.error("Error al cargar acompañantes predeterminados:", loadError);
+      return toast.error("No se pudieron cargar los acompañantes predeterminados");
+    }
     setCode(clean);
-    setCompanions([]);
+    setCompanions(savedCompanions);
     setDriver(row);
+  }
+
+  async function saveCompanionDefaults(categories: Category[] = companions) {
+    setSavingDefaults(true);
+    try {
+      const { error } = await supabase.rpc("save_my_companion_defaults", {
+        _companions: categories,
+      });
+      if (error) throw error;
+      setDefaultCompanions(categories);
+      toast.success(
+        categories.length
+          ? "Acompañantes guardados para próximos pagos"
+          : "Acompañantes predeterminados eliminados",
+      );
+    } catch (error) {
+      console.error("Error al guardar acompañantes predeterminados:", error);
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar la configuración");
+    } finally {
+      setSavingDefaults(false);
+    }
+  }
+
+  async function saveRating(transaction: MyTx) {
+    const rating = ratingSelections[transaction.id];
+    if (
+      !userId ||
+      !Number.isFinite(rating) ||
+      rating < 0.5 ||
+      rating > 5 ||
+      rating * 2 !== Math.trunc(rating * 2)
+    ) {
+      return;
+    }
+    const comment = ratingComments[transaction.id]?.trim() ?? "";
+    if (comment.length > 500) return toast.error("El comentario no puede superar 500 caracteres");
+    setRatingSavingId(transaction.id);
+    try {
+      const { error } = await supabase.from("transaction_ratings").insert({
+        transaction_id: transaction.id,
+        passenger_id: userId,
+        rating,
+        selected_comments: ratingReasonSelections[transaction.id] ?? [],
+        comment: comment || null,
+      });
+      if (error) throw error;
+      setHistory((current) =>
+        current.map((item) =>
+          item.id === transaction.id
+            ? {
+                ...item,
+                rating,
+                selected_comments: ratingReasonSelections[transaction.id] ?? [],
+                comment: comment || null,
+              }
+            : item,
+        ),
+      );
+      toast.success("Gracias por calificar al chofer");
+    } catch (error) {
+      console.error("Error al guardar calificación:", error);
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar la calificación");
+    } finally {
+      setRatingSavingId(null);
+    }
   }
 
   async function doTopup() {
@@ -605,11 +829,46 @@ function PassengerPage() {
               <Button
                 variant="outline"
                 className="w-full border-brand-blue text-brand-blue hover:bg-brand-blue-light"
-                disabled={tickets >= 10 || availableCompanionCategories.length === 0}
+                disabled={tickets >= 10}
                 onClick={addCompanion}
               >
                 <Plus className="w-4 h-4 mr-2" /> Agregar acompañante
               </Button>
+
+              <div className="flex items-start gap-2 border-t pt-3">
+                <Switch
+                  id="save-companion-defaults"
+                  checked={companionsMatchDefaults}
+                  onCheckedChange={(checked) => {
+                    if (checked) void saveCompanionDefaults();
+                    else void saveCompanionDefaults([]);
+                  }}
+                  disabled={
+                    savingDefaults || (companions.length === 0 && defaultCompanions.length === 0)
+                  }
+                  aria-label="Guardar acompañantes para próximos pagos"
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="save-companion-defaults" className="text-sm font-medium">
+                    Guardar acompañantes predeterminados
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Se agregarán automáticamente al buscar un chofer.
+                  </p>
+                  {defaultCompanions.length > 0 && !companionsMatchDefaults && (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-xs text-brand-blue"
+                      onClick={() => void saveCompanionDefaults([])}
+                      disabled={savingDefaults}
+                    >
+                      Quitar los guardados sin cambiar este pago
+                    </Button>
+                  )}
+                </div>
+                {savingDefaults && <Loader2 className="ml-auto h-4 w-4 animate-spin" />}
+              </div>
 
               <div className="mt-1 text-sm space-y-1">
                 <div className="flex justify-between">
@@ -803,6 +1062,130 @@ function PassengerPage() {
                   <FareBreakdown transaction={t} nombre={nombre} hideAmounts={hideAmounts} />
                 </div>
               )}
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t pt-2">
+                {typeof t.rating === "number" ? (
+                  <div className="w-full space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Calificaste al chofer con {t.rating} de 5 estrellas
+                    </p>
+                    {!!t.selected_comments?.length && (
+                      <div className="flex flex-wrap gap-1">
+                        {t.selected_comments.map((reason) => (
+                          <span
+                            key={reason}
+                            className="rounded-full bg-brand-blue-light px-2 py-1 text-xs text-brand-blue-dark"
+                          >
+                            {getRatingReasonLabel(reason) ?? reason}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {t.comment && (
+                      <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                        {t.comment}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-full space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-muted-foreground">Califica al chofer</p>
+                      <StarRatingInput
+                        value={ratingSelections[t.id] ?? 0}
+                        onChange={(rating) => {
+                          setRatingSelections((current) => ({ ...current, [t.id]: rating }));
+                          const allowedReasons = new Set<string>(
+                            getRatingReasons(rating).map((reason) => reason.value),
+                          );
+                          setRatingReasonSelections((current) => ({
+                            ...current,
+                            [t.id]: (current[t.id] ?? []).filter((reason) =>
+                              allowedReasons.has(reason),
+                            ),
+                          }));
+                        }}
+                        disabled={ratingSavingId === t.id}
+                      />
+                    </div>
+                    {!!ratingSelections[t.id] && (
+                      <>
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            {ratingSelections[t.id] >= 4
+                              ? "¿Qué aspectos destacas o podrían mejorar?"
+                              : "¿Qué aspectos salieron bien o podrían mejorar?"}
+                          </p>
+                          {getRatingReasons(ratingSelections[t.id]).map((reason) => {
+                            const selected = (
+                              ratingReasonSelections[t.id] ?? []
+                            ).includes(reason.value);
+                            return (
+                              <Label
+                                key={reason.value}
+                                className="flex cursor-pointer items-center gap-2 text-sm font-normal"
+                              >
+                                <Checkbox
+                                  checked={selected}
+                                  disabled={ratingSavingId === t.id}
+                                  onCheckedChange={(checked) =>
+                                    setRatingReasonSelections((current) => {
+                                      const selectedReasons = current[t.id] ?? [];
+                                      return {
+                                        ...current,
+                                        [t.id]:
+                                          checked === true
+                                            ? [...selectedReasons, reason.value]
+                                            : selectedReasons.filter(
+                                                (item) => item !== reason.value,
+                                              ),
+                                      };
+                                    })
+                                  }
+                                />
+                                {reason.label}
+                              </Label>
+                            );
+                          })}
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor={`rating-comment-${t.id}`} className="text-sm">
+                            Comentario (opcional)
+                          </Label>
+                          <Textarea
+                            id={`rating-comment-${t.id}`}
+                            value={ratingComments[t.id] ?? ""}
+                            onChange={(event) =>
+                              setRatingComments((current) => ({
+                                ...current,
+                                [t.id]: event.target.value,
+                              }))
+                            }
+                            maxLength={500}
+                            rows={3}
+                            placeholder="Cuéntanos más sobre tu experiencia"
+                            disabled={ratingSavingId === t.id}
+                          />
+                          <p className="text-right text-xs text-muted-foreground">
+                            {(ratingComments[t.id] ?? "").length}/500
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="bg-brand-blue text-white hover:bg-brand-blue-dark"
+                          disabled={ratingSavingId === t.id}
+                          onClick={() => void saveRating(t)}
+                        >
+                          {ratingSavingId === t.id && (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          )}
+                          Enviar calificación
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
           {history.length === 0 && (

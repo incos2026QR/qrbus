@@ -11,6 +11,7 @@ import { QrCode, Bus, UserPlus, LogIn, Loader2, Eye, EyeOff } from "lucide-react
 import { useSession } from "@/hooks/use-session";
 import { PassengerRegister } from "@/components/registration/PassengerRegister";
 import { DriverRegister } from "@/components/registration/DriverRegister";
+import { normalizeBolivianPhone } from "@/lib/registration-validation";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -110,12 +111,16 @@ function LoginForm() {
     try {
       let email = identifier.trim();
       if (!email.includes("@")) {
-        const { data, error } = await supabase.rpc("lookup_email_by_phone", { _phone: email });
+        const phone = normalizeBolivianPhone(email) ?? email;
+        const { data, error } = await supabase.rpc("lookup_email_by_phone", { _phone: phone });
         if (error) throw error;
         if (!data) throw new Error("Teléfono no registrado");
         email = data as string;
       }
-      const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data: signInData, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
       if (error) throw error;
 
       const { data: staff, error: statusError } = await supabase
@@ -129,7 +134,11 @@ function LoginForm() {
         throw new Error("No se pudo verificar el estado de la cuenta. Inténtalo nuevamente.");
       }
 
-      if (String(staff?.status ?? "").trim().toLowerCase() === "suspended") {
+      if (
+        String(staff?.status ?? "")
+          .trim()
+          .toLowerCase() === "suspended"
+      ) {
         await supabase.auth.signOut();
         throw new Error("Tu cuenta está suspendida. Contacta al administrador.");
       }

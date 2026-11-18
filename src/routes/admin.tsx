@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useSession, type Profile } from "@/hooks/use-session";
 import { getSignedUrl } from "@/lib/image";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
   LogOut,
@@ -35,13 +37,10 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cleanAccount, formatAccount } from "@/lib/bank";
+import { isValidBankAccount } from "@/lib/registration-validation";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
-import {
-  createSupervisor,
-  updateSupervisor,
-  updateSupervisorPassword,
-} from "@/lib/auth.functions";
+import { createSupervisor, updateSupervisor, updateSupervisorPassword } from "@/lib/auth.functions";
 import { STATUS_LABELS, ALL_CATEGORIES, type Category } from "@/lib/categories";
 import { useTarifas } from "@/lib/tarifas";
 import { useBancos } from "@/lib/catalogs";
@@ -51,7 +50,9 @@ export const Route = createFileRoute("/admin")({ ssr: false, component: AdminPag
 type Tab = "drivers" | "passengers" | "supervisors" | "transactions" | "reports";
 
 function normalizeProfileStatus(status?: string | null): Profile["status"] {
-  const normalized = String(status ?? "").trim().toLowerCase();
+  const normalized = String(status ?? "")
+    .trim()
+    .toLowerCase();
 
   switch (normalized) {
     case "pending":
@@ -317,6 +318,8 @@ function UserTable({
 
   async function saveBankAccount() {
     if (!selected) return;
+    if (bankAccount && !isValidBankAccount(bankAccount))
+      return toast.error("La cuenta solo puede contener números y guion medio");
     const { error } = await supabase
       .from("profiles")
       .update({ bank_account: cleanAccount(bankAccount), bank_name: bankName || null })
@@ -502,10 +505,10 @@ function UserTable({
                       </SelectContent>
                     </Select>
                     <Input
-                      inputMode="numeric"
+                      inputMode="text"
                       value={bankAccount}
                       onChange={(e) => setBankAccount(cleanAccount(e.target.value))}
-                      placeholder="Ej. 104578"
+                      placeholder="Ej. 104578 o 10-4578"
                     />
                     <Button
                       variant="outline"
@@ -753,7 +756,9 @@ function SupervisorEditor({ supervisor, onSaved }: { supervisor: Profile; onSave
 
       <div className="border-t pt-3">
         <Button
-          variant={normalizeProfileStatus(supervisor.status) === "suspended" ? "default" : "destructive"}
+          variant={
+            normalizeProfileStatus(supervisor.status) === "suspended" ? "default" : "destructive"
+          }
           className={
             normalizeProfileStatus(supervisor.status) === "suspended"
               ? "bg-brand-blue text-white hover:bg-brand-blue-dark"
@@ -1170,6 +1175,7 @@ type TxRow = {
   latitude: number | null;
   longitude: number | null;
   created_at: string;
+  fare_breakdown: Json;
 };
 
 type TransactionProfile = {
@@ -1177,12 +1183,13 @@ type TransactionProfile = {
   role: Profile["role"];
   first_name: string | null;
   paternal_surname: string | null;
+  maternal_surname: string | null;
   category: Profile["category"];
   driver_code: string | null;
 };
 
-type ReportPeriod = "day" | "week" | "month" | "year";
-type ReportBreakdown = "none" | "passenger" | "passengerType" | "driver";
+type ReportPeriod = "week" | "month" | "year";
+type ReportBreakdown = "none" | "passenger" | "category" | "driver";
 
 type TransactionSummary = {
   periodKey: string;
@@ -1198,12 +1205,15 @@ function TransactionsPanel() {
   const { nombre } = useTarifas();
   const [rows, setRows] = useState<TxRow[]>([]);
   const [profiles, setProfiles] = useState<Record<string, TransactionProfile>>({});
-  const [drivers, setDrivers] = useState<TransactionProfile[]>([]);
+  const [dimensionProfiles, setDimensionProfiles] = useState<TransactionProfile[]>([]);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [period, setPeriod] = useState<ReportPeriod>("day");
+  const [period, setPeriod] = useState<ReportPeriod>("week");
   const [breakdown, setBreakdown] = useState<ReportBreakdown>("none");
-  const [driverId, setDriverId] = useState("all");
+  const [dimensionScope, setDimensionScope] = useState<"all" | "specific">("all");
+  const [dimensionSearch, setDimensionSearch] = useState("");
+  const [selectedDimensionId, setSelectedDimensionId] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState<Category[]>(ALL_CATEGORIES);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1257,7 +1267,9 @@ function TransactionsPanel() {
         for (let index = 0; index < ids.length; index += 100) {
           const { data, error } = await supabase
             .from("profiles")
-            .select("id, role, first_name, paternal_surname, category, driver_code")
+            .select(
+              "id, role, first_name, paternal_surname, maternal_surname, category, driver_code",
+            )
             .in("id", ids.slice(index, index + 100));
           if (error) throw new Error(error.message);
           for (const profile of (data ?? []) as TransactionProfile[]) {
@@ -1286,20 +1298,20 @@ function TransactionsPanel() {
 
   useEffect(() => {
     let active = true;
-    async function loadDrivers() {
+    async function loadDimensionProfiles() {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, role, first_name, paternal_surname, category, driver_code")
-        .eq("role", "driver")
+        .select("id, role, first_name, paternal_surname, maternal_surname, category, driver_code")
+        .in("role", ["driver", "passenger"])
         .order("first_name");
       if (error) {
-        if (active) toast.error(`No se pudieron cargar los choferes: ${error.message}`);
+        if (active) toast.error(`No se pudieron cargar pasajeros y choferes: ${error.message}`);
         return;
       }
-      if (active) setDrivers((data as TransactionProfile[]) ?? []);
+      if (active) setDimensionProfiles((data as TransactionProfile[]) ?? []);
     }
 
-    void loadDrivers();
+    void loadDimensionProfiles();
     return () => {
       active = false;
     };
@@ -1309,15 +1321,25 @@ function TransactionsPanel() {
     startDate && endDate && startDate > endDate
       ? "La fecha de inicio no puede ser posterior a la fecha fin."
       : "";
-  const filteredRows = rows.filter(
-    (transaction) => driverId === "all" || transaction.driver_id === driverId,
-  );
+  const dimensionType = breakdown === "passenger" ? "passenger" : "driver";
+  const filteredRows = rows.filter((transaction) => {
+    if ((breakdown === "passenger" || breakdown === "driver") && dimensionScope === "specific") {
+      if (!selectedDimensionId) return false;
+      const selectedId =
+        breakdown === "passenger" ? transaction.passenger_id : transaction.driver_id;
+      if (selectedId !== selectedDimensionId) return false;
+    }
+    if (breakdown === "category") {
+      const category = profiles[transaction.passenger_id]?.category;
+      if (!category || !selectedCategories.includes(category)) return false;
+    }
+    return true;
+  });
 
   function getPeriod(value: string) {
     const date = new Date(value);
     const year = date.getFullYear();
     const month = date.getMonth();
-    const day = date.getDate();
     if (period === "year") {
       return { key: `${year}`, label: `${year}` };
     }
@@ -1327,20 +1349,16 @@ function TransactionsPanel() {
         label: date.toLocaleDateString("es-BO", { month: "long", year: "numeric" }),
       };
     }
-    if (period === "week") {
-      const monday = new Date(year, month, day);
-      monday.setDate(day - ((monday.getDay() + 6) % 7));
-      const sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);
-      const dateKey = (value: Date) =>
-        `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-      return {
-        key: dateKey(monday),
-        label: `${monday.toLocaleDateString("es-BO")} - ${sunday.toLocaleDateString("es-BO")}`,
-      };
-    }
-    const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    return { key: dateKey, label: date.toLocaleDateString("es-BO") };
+    const monday = new Date(year, month, date.getDate());
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const dateKey = (value: Date) =>
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+    return {
+      key: dateKey(monday),
+      label: `${monday.toLocaleDateString("es-BO")} - ${sunday.toLocaleDateString("es-BO")}`,
+    };
   }
 
   function getDimension(transaction: TxRow) {
@@ -1350,7 +1368,7 @@ function TransactionsPanel() {
         label: getDimensionName(transaction.passenger_id, transaction.passenger_id),
       };
     }
-    if (breakdown === "passengerType") {
+    if (breakdown === "category") {
       const category = profiles[transaction.passenger_id]?.category;
       return {
         key: category ?? "unknown",
@@ -1403,7 +1421,7 @@ function TransactionsPanel() {
           ? nombre(profiles[t.passenger_id].category)
           : "Sin tipo registrado",
         Chofer: getDimensionName(t.driver_id, t.driver_id),
-        Tarifa: nombre(t.category),
+        "Tarifas acompañantes extra": getCompanionFareTypes(t),
         Pasajes: t.tickets,
         "Monto (Bs)": Number(t.amount),
         Latitud: t.latitude ?? "",
@@ -1436,7 +1454,28 @@ function TransactionsPanel() {
   }
 
   function profileName(profile: TransactionProfile, fallback: string) {
-    return `${profile.first_name ?? ""} ${profile.paternal_surname ?? ""}`.trim() || fallback;
+    return (
+      `${profile.first_name ?? ""} ${profile.paternal_surname ?? ""} ${profile.maternal_surname ?? ""}`
+        .trim()
+        .replace(/\s+/g, " ") || fallback
+    );
+  }
+
+  function getCompanionFareTypes(transaction: TxRow) {
+    const counts = new Map<string, number>();
+    if (!Array.isArray(transaction.fare_breakdown)) return "—";
+    for (const item of transaction.fare_breakdown) {
+      if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+      const { category, kind, tickets } = item;
+      if (kind !== "acompanante" || typeof category !== "string") continue;
+      const count = typeof tickets === "number" ? tickets : 1;
+      counts.set(category, (counts.get(category) ?? 0) + count);
+    }
+    return (
+      Array.from(counts, ([category, count]) =>
+        count > 1 ? `${nombre(category)} (${count})` : nombre(category),
+      ).join(", ") || "—"
+    );
   }
 
   const total = filteredRows.reduce((sum, transaction) => sum + Number(transaction.amount), 0);
@@ -1447,16 +1486,24 @@ function TransactionsPanel() {
   const breakdownLabel =
     breakdown === "passenger"
       ? "Pasajero"
-      : breakdown === "passengerType"
-        ? "Tipo de pasajero"
+      : breakdown === "category"
+        ? "Categoría"
         : breakdown === "driver"
           ? "Chofer"
           : "Agrupación";
-  const periodLabel = { day: "Diario", week: "Semanal", month: "Mensual", year: "Anual" }[period];
-  const selectedDriver = drivers.find((driver) => driver.id === driverId);
-  const driverLabel = selectedDriver
-    ? profileName(selectedDriver, selectedDriver.driver_code ?? selectedDriver.id)
-    : "Todos los choferes";
+  const periodLabel = { week: "Semanal", month: "Mensual", year: "Anual" }[period];
+  const selectedDimension = dimensionProfiles.find(
+    (candidate) => candidate.id === selectedDimensionId,
+  );
+  const dimensionCandidates = dimensionProfiles.filter(
+    (candidate) => candidate.role === dimensionType,
+  );
+  const search = dimensionSearch.trim().toLocaleLowerCase("es");
+  const matchingDimensions = dimensionCandidates.filter((candidate) =>
+    profileName(candidate, "").toLocaleLowerCase("es").includes(search),
+  );
+  const dimensionLabel =
+    breakdown === "passenger" ? "Pasajero" : breakdown === "driver" ? "Chofer" : "Todos";
 
   function generatePdf() {
     try {
@@ -1483,7 +1530,9 @@ function TransactionsPanel() {
       writeText(
         `Periodo: ${startDate || "Sin fecha de inicio"} - ${endDate || "Sin fecha fin"} · Vista ${periodLabel.toLowerCase()}`,
       );
-      writeText(`Chofer: ${driverLabel} · Desglose: ${breakdownLabel}`);
+      writeText(
+        `${dimensionLabel}: ${selectedDimension ? profileName(selectedDimension, selectedDimension.id) : "General"} · Desglose: ${breakdownLabel}`,
+      );
       writeText(
         `Pagos: ${filteredRows.length} · Pasajes: ${totalTickets} · Total: Bs ${total.toFixed(2)}`,
       );
@@ -1502,14 +1551,14 @@ function TransactionsPanel() {
       document.setFont("helvetica", "bold");
       writeText("Detalle de transacciones", margins, 12);
       const columns = [
-        { title: "Fecha", x: 14, max: 22 },
-        { title: "Código", x: 52, max: 12 },
-        { title: "Pasajero", x: 77, max: 23 },
-        { title: "Tipo", x: 116, max: 17 },
-        { title: "Chofer", x: 146, max: 23 },
-        { title: "Tarifa", x: 185, max: 21 },
-        { title: "Pasajes", x: 222, max: 8 },
-        { title: "Monto Bs", x: 250, max: 17 },
+        { title: "Fecha", x: 14, max: 15 },
+        { title: "Código", x: 42, max: 12 },
+        { title: "Pasajero", x: 64, max: 20 },
+        { title: "Tipo", x: 98, max: 14 },
+        { title: "Chofer", x: 123, max: 20 },
+        { title: "Tarifas acompañantes", x: 157, max: 33 },
+        { title: "Pasajes", x: 218, max: 8 },
+        { title: "Monto Bs", x: 244, max: 17 },
       ];
       const writeTableHeader = () => {
         document.setFont("helvetica", "bold");
@@ -1534,7 +1583,7 @@ function TransactionsPanel() {
             ? nombre(profiles[transaction.passenger_id].category)
             : "Sin tipo",
           getDimensionName(transaction.driver_id, transaction.driver_id),
-          nombre(transaction.category),
+          getCompanionFareTypes(transaction),
           String(transaction.tickets),
           Number(transaction.amount).toFixed(2),
         ];
@@ -1603,7 +1652,6 @@ function TransactionsPanel() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="day">Diario</SelectItem>
               <SelectItem value="week">Semanal</SelectItem>
               <SelectItem value="month">Mensual</SelectItem>
               <SelectItem value="year">Anual</SelectItem>
@@ -1614,7 +1662,13 @@ function TransactionsPanel() {
           <span className="font-medium">Desglosar por</span>
           <Select
             value={breakdown}
-            onValueChange={(value) => setBreakdown(value as ReportBreakdown)}
+            onValueChange={(value) => {
+              setBreakdown(value as ReportBreakdown);
+              setDimensionScope("all");
+              setDimensionSearch("");
+              setSelectedDimensionId("");
+              if (value === "category") setSelectedCategories(ALL_CATEGORIES);
+            }}
           >
             <SelectTrigger>
               <SelectValue />
@@ -1622,27 +1676,96 @@ function TransactionsPanel() {
             <SelectContent>
               <SelectItem value="none">Sin desglose</SelectItem>
               <SelectItem value="passenger">Pasajero</SelectItem>
-              <SelectItem value="passengerType">Tipo de pasajero</SelectItem>
+              <SelectItem value="category">Categoría</SelectItem>
               <SelectItem value="driver">Chofer</SelectItem>
             </SelectContent>
           </Select>
         </label>
-        <label className="text-sm space-y-1">
-          <span className="font-medium">Filtrar por chofer</span>
-          <Select value={driverId} onValueChange={setDriverId}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los choferes</SelectItem>
-              {drivers.map((driver) => (
-                <SelectItem key={driver.id} value={driver.id}>
-                  {profileName(driver, driver.driver_code ?? driver.id)}
-                </SelectItem>
+        {(breakdown === "passenger" || breakdown === "driver") && (
+          <>
+            <label className="text-sm space-y-1">
+              <span className="font-medium">Alcance</span>
+              <Select
+                value={dimensionScope}
+                onValueChange={(value) => {
+                  setDimensionScope(value as "all" | "specific");
+                  setDimensionSearch("");
+                  setSelectedDimensionId("");
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">General</SelectItem>
+                  <SelectItem value="specific">Persona específica</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            {dimensionScope === "specific" && (
+              <div className="text-sm space-y-1">
+                <label className="font-medium" htmlFor="report-dimension-search">
+                  Buscar {dimensionLabel.toLocaleLowerCase("es")}
+                </label>
+                <Input
+                  id="report-dimension-search"
+                  value={dimensionSearch}
+                  onChange={(event) => {
+                    setDimensionSearch(event.target.value);
+                    setSelectedDimensionId("");
+                  }}
+                  placeholder="Escribe un nombre o apellido"
+                  autoComplete="off"
+                />
+                {dimensionSearch.trim() && !selectedDimensionId && (
+                  <div className="max-h-40 overflow-y-auto rounded-md border bg-background">
+                    {matchingDimensions.length > 0 ? (
+                      matchingDimensions.map((candidate) => (
+                        <button
+                          key={candidate.id}
+                          type="button"
+                          className="block w-full px-3 py-2 text-left hover:bg-muted"
+                          onClick={() => {
+                            setSelectedDimensionId(candidate.id);
+                            setDimensionSearch(profileName(candidate, candidate.id));
+                          }}
+                        >
+                          {profileName(candidate, candidate.id)}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-3 py-2 text-muted-foreground">
+                        No se encontraron coincidencias.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+        {breakdown === "category" && (
+          <fieldset className="space-y-2 text-sm">
+            <legend className="font-medium">Categorías a incluir</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {ALL_CATEGORIES.map((category) => (
+                <label key={category} className="inline-flex items-center gap-2">
+                  <Checkbox
+                    checked={selectedCategories.includes(category)}
+                    onCheckedChange={(checked) =>
+                      setSelectedCategories((current) =>
+                        checked
+                          ? [...current, category]
+                          : current.filter((value) => value !== category),
+                      )
+                    }
+                  />
+                  {nombre(category)}
+                </label>
               ))}
-            </SelectContent>
-          </Select>
-        </label>
+            </div>
+          </fieldset>
+        )}
       </div>
       {dateError && <p className="text-sm text-destructive mb-3">{dateError}</p>}
       {!startDate && !endDate && (
@@ -1698,7 +1821,7 @@ function TransactionsPanel() {
               <th className="py-2 pr-3">Pasajero</th>
               <th className="py-2 pr-3">Tipo de pasajero</th>
               <th className="py-2 pr-3">Chofer</th>
-              <th className="py-2 pr-3">Tarifa</th>
+              <th className="py-2 pr-3">Tarifas acompañantes extra</th>
               <th className="py-2 pr-3">Pasajes</th>
               <th className="py-2 pr-3">Monto</th>
               <th className="py-2 pr-3">Ubicación</th>
@@ -1718,7 +1841,7 @@ function TransactionsPanel() {
                     : "—"}
                 </td>
                 <td className="py-2 pr-3">{getDimensionName(t.driver_id, "—")}</td>
-                <td className="py-2 pr-3">{nombre(t.category)}</td>
+                <td className="py-2 pr-3">{getCompanionFareTypes(t)}</td>
                 <td className="py-2 pr-3">{t.tickets}</td>
                 <td className="py-2 pr-3">Bs {Number(t.amount).toFixed(2)}</td>
                 <td className="py-2 pr-3">

@@ -236,6 +236,24 @@ export type Database = {
         }
         Relationships: []
       }
+      passenger_companion_defaults: {
+        Row: {
+          categories: Database["public"]["Enums"]["fare_category"][]
+          passenger_id: string
+          updated_at: string
+        }
+        Insert: {
+          categories?: Database["public"]["Enums"]["fare_category"][]
+          passenger_id: string
+          updated_at?: string
+        }
+        Update: {
+          categories?: Database["public"]["Enums"]["fare_category"][]
+          passenger_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       reports: {
         Row: {
           admin_notes: string | null
@@ -350,6 +368,33 @@ export type Database = {
           passenger_id?: string
           tickets?: number
           verification_code?: string
+        }
+        Relationships: []
+      }
+      transaction_ratings: {
+        Row: {
+          created_at: string
+          comment: string | null
+          passenger_id: string
+          rating: number
+          selected_comments: string[]
+          transaction_id: string
+        }
+        Insert: {
+          created_at?: string
+          comment?: string | null
+          passenger_id: string
+          rating: number
+          selected_comments?: string[]
+          transaction_id: string
+        }
+        Update: {
+          created_at?: string
+          comment?: string | null
+          passenger_id?: string
+          rating?: number
+          selected_comments?: string[]
+          transaction_id?: string
         }
         Relationships: []
       }
@@ -547,6 +592,25 @@ export type Database = {
         }
         Relationships: []
       }
+      driver_rating_report_summary: {
+        Row: {
+          average_rating: number | null
+          driver_id: string | null
+          rating_0_5_count: number | null
+          rating_1_count: number | null
+          rating_1_5_count: number | null
+          rating_2_count: number | null
+          rating_2_5_count: number | null
+          rating_3_count: number | null
+          rating_3_5_count: number | null
+          rating_4_count: number | null
+          rating_4_5_count: number | null
+          rating_5_count: number | null
+          rating_count: number | null
+          selected_reason_counts: Json | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       complete_bank_withdrawal: {
@@ -631,6 +695,10 @@ export type Database = {
         }[]
       }
       safe_profile_date: { Args: { _value: string }; Returns: string }
+      save_my_companion_defaults: {
+        Args: { _companions: Database["public"]["Enums"]["fare_category"][] }
+        Returns: undefined
+      }
       topup_wallet: { Args: { _amount: number }; Returns: Json }
       withdraw_earnings: {
         Args: { _amount: number; _destination: string }
