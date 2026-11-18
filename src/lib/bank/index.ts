@@ -1,7 +1,12 @@
 import { AdaptadorTrufi } from "./trufi-adapter";
 import type { AdaptadorBancario, PagoPasajeParams } from "./types";
 
-export type { AdaptadorBancario, CuentaBancaria, PagoPasajeParams, PagoPasajeResultado } from "./types";
+export type {
+  AdaptadorBancario,
+  CuentaBancaria,
+  PagoPasajeParams,
+  PagoPasajeResultado,
+} from "./types";
 export { TRUFI_API, AdaptadorTrufi } from "./trufi-adapter";
 
 /**
@@ -35,7 +40,7 @@ export function obtenerAdaptador(banco?: string | null): AdaptadorBancario {
 
 /** Mantiene el identificador de cuenta tal cual lo maneja el banco */
 export function cleanAccount(input: string): string {
-  return (input ?? "").trim();
+  return (input ?? "").replace(/[^\d-]/g, "");
 }
 
 /** Formato de visualización uniforme para cuentas bancarias. */
@@ -43,10 +48,14 @@ export function formatAccount(bankName?: string | null, account?: string | null)
   return `Banco: ${bankName?.trim() || "—"} | Cuenta: ${cleanAccount(account ?? "") || "—"}`;
 }
 
-
 // ---- Fachada: la app llama estas funciones y el adaptador resuelve el banco ----
 
-export function createAccount(cuentaId: string, titular: string, banco?: string | null, saldo?: number) {
+export function createAccount(
+  cuentaId: string,
+  titular: string,
+  banco?: string | null,
+  saldo?: number,
+) {
   return obtenerAdaptador(banco).crearCuenta(cuentaId, titular, saldo);
 }
 

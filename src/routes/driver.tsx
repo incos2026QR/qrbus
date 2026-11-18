@@ -144,7 +144,6 @@ function DriverPage() {
   const [glow, setGlow] = useState(false);
   const [showCount, setShowCount] = useState<string>("5");
 
-
   async function downloadQr() {
     if (!codeQr) return;
     const code = profile?.driver_code ?? "";
@@ -222,8 +221,6 @@ function DriverPage() {
       toast.error(error instanceof Error ? error.message : "No se pudo descargar el QR");
     }
   }
-
-
 
   async function linkBluetooth() {
     if (!isBluetoothSupported()) return toast.error("Este navegador no soporta Web Bluetooth");
@@ -324,7 +321,13 @@ function DriverPage() {
           setFlash(true);
           setGlow(true);
           playSuccessChime();
-          void sendPaymentOk(Number(t.amount ?? 0));
+          void sendPaymentOk(t).catch((error: unknown) => {
+            toast.error(
+              `Pago registrado, pero no se pudo enviar al tablero: ${
+                error instanceof Error ? error.message : "error de Bluetooth"
+              }`,
+            );
+          });
           void refreshRef.current();
           if (flashTimeout) clearTimeout(flashTimeout);
           if (glowTimeout) clearTimeout(glowTimeout);
@@ -397,7 +400,9 @@ function DriverPage() {
       await refresh();
       setWithdrawalPending(false);
       playSuccessChime();
-      toast.success(`Retiro de Bs ${amount.toFixed(2)} enviado a ${formatAccount(profile?.bank_name, account)}`);
+      toast.success(
+        `Retiro de Bs ${amount.toFixed(2)} enviado a ${formatAccount(profile?.bank_name, account)}`,
+      );
       setWOpen(false);
       setWAmount("");
     } catch (e) {
@@ -447,7 +452,6 @@ function DriverPage() {
   const balance = Number(profile.balance ?? 0);
   const account = cleanAccount(profile.bank_account ?? "");
   const money = (n: number) => (hideMoney ? "••••••" : `Bs ${n.toFixed(2)}`);
-
 
   return (
     <div className="relative mx-auto min-h-screen max-w-2xl space-y-4 bg-gradient-to-b from-brand-blue-light/40 via-background to-brand-orange-light/30 p-4">
@@ -568,10 +572,7 @@ function DriverPage() {
           </Dialog>
 
           {/* Retirar ganancias */}
-          <Dialog
-            open={wOpen}
-            onOpenChange={setWOpen}
-          >
+          <Dialog open={wOpen} onOpenChange={setWOpen}>
             <DialogTrigger asChild>
               <Button
                 size="icon"
@@ -586,9 +587,7 @@ function DriverPage() {
                         ? "No tienes saldo disponible"
                         : "Retirar ganancias"
                 }
-                disabled={
-                  balance <= 0 || !account || withdrawalPending || withdrawalStatusLoading
-                }
+                disabled={balance <= 0 || !account || withdrawalPending || withdrawalStatusLoading}
               >
                 <Banknote className="w-5 h-5" />
               </Button>
@@ -647,8 +646,6 @@ function DriverPage() {
             </DialogContent>
           </Dialog>
 
-
-
           <Button
             size="icon"
             variant="ghost"
@@ -692,7 +689,8 @@ function DriverPage() {
             {txs[0].verification_code}
           </div>
           <p className="text-xl font-bold">
-            {Number(txs[0].tickets ?? 1)} Pasaje{Number(txs[0].tickets ?? 1) > 1 ? "s" : ""} · Pago recibido
+            {Number(txs[0].tickets ?? 1)} Pasaje{Number(txs[0].tickets ?? 1) > 1 ? "s" : ""} · Pago
+            recibido
           </p>
           <FareBreakdown transaction={txs[0]} nombre={nombre} />
         </div>
@@ -770,7 +768,9 @@ function DriverPage() {
       <Card className="space-y-4 border-brand-blue/15 p-5 shadow-md">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Total recaudado hoy</p>
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">
+              Total recaudado hoy
+            </p>
             <div className="text-4xl font-black">{money(totalToday)}</div>
           </div>
           <Button
@@ -799,7 +799,6 @@ function DriverPage() {
           </div>
         </div>
       </Card>
-
     </div>
   );
 }

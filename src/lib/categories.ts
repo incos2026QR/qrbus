@@ -12,10 +12,15 @@ export const ALL_CATEGORIES: Category[] = [
   "discapacidad",
 ];
 
-
 export function computeAge(birthdate: string): number {
-  const b = new Date(birthdate);
+  const parts = birthdate.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return 0;
+  const [year, month, day] = parts;
+  const b = new Date(year, month - 1, day);
   const now = new Date();
+  if (b.getFullYear() !== year || b.getMonth() !== month - 1 || b.getDate() !== day || b > now) {
+    return 0;
+  }
   let age = now.getFullYear() - b.getFullYear();
   const m = now.getMonth() - b.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
@@ -56,13 +61,19 @@ export function resolveCategory(
   return precio(base) <= precio("discapacidad") ? base : "discapacidad";
 }
 
-export function qrColumnFor(category: Category): "qr_general_url" | "qr_primaria_url" | "qr_secundaria_url" | "qr_adulto_url" {
+export function qrColumnFor(
+  category: Category,
+): "qr_general_url" | "qr_primaria_url" | "qr_secundaria_url" | "qr_adulto_url" {
   switch (category) {
-    case "primaria": return "qr_primaria_url";
-    case "secundaria": return "qr_secundaria_url";
+    case "primaria":
+      return "qr_primaria_url";
+    case "secundaria":
+      return "qr_secundaria_url";
     case "adulto_mayor":
-    case "discapacidad": return "qr_adulto_url";
-    default: return "qr_general_url";
+    case "discapacidad":
+      return "qr_adulto_url";
+    default:
+      return "qr_general_url";
   }
 }
 
@@ -96,7 +107,6 @@ export function isBlockedStatus(status?: string | null): boolean {
 export function isActiveStatus(status?: string | null): boolean {
   return String(status ?? "").toLowerCase() === "active";
 }
-
 
 export const ROLE_LABELS: Record<string, string> = {
   admin: "Administrador",
