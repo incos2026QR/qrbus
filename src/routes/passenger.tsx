@@ -654,6 +654,8 @@ function PassengerPage() {
   }
 
   if (pass) {
+    const paidTicketCount = pass.items.reduce((total, item) => total + item.count, 0);
+
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center overflow-auto bg-gradient-to-br from-brand-blue-light/40 via-background to-brand-orange-light/30 p-6">
         <div className="text-center max-w-sm w-full">
@@ -671,7 +673,7 @@ function PassengerPage() {
             />
           )}
           <div className="mt-5 text-2xl font-bold">
-            {pass.items.length} {pass.items.length === 1 ? "Pasaje pagado" : "Pasajes pagados"}
+            {paidTicketCount} {paidTicketCount === 1 ? "Pasaje pagado" : "Pasajes pagados"}
           </div>
           <div className="mt-3 space-y-2 rounded-md border border-brand-blue/15 bg-card/90 p-3 text-left">
             <div className="flex justify-between gap-3 text-sm">
