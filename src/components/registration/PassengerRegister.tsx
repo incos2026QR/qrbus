@@ -156,13 +156,18 @@ export function PassengerRegister() {
       return toast.error("Ingresa una fecha de nacimiento válida que no sea futura");
     const age = computeAge(s.birthdate);
     const bucket = ageBucket(age);
-    const chosen = bucket.forced ?? s.chosen;
+    const chosen =
+      bucket.forced ?? (bucket.options.includes(s.chosen) ? s.chosen : bucket.options[0]!);
     const finalCategory = resolveCategory(age, chosen, s.hasDisability, precio);
 
     if (!captchaOk) return toast.error("Completa la verificación humana");
 
-    if (bucket.requiresUniversityDoc && chosen === "secundaria" && !s.files.university) {
-      return toast.error("Sube el Carnet Universitario/Estudiantil");
+    if (
+      bucket.requiresStudentDoc &&
+      (chosen === "secundaria" || chosen === "universitario") &&
+      !s.files.university
+    ) {
+      return toast.error("Sube tu carnet escolar o universitario");
     }
     if (s.hasDisability && !s.files.disability) {
       return toast.error("Sube el Carnet de Discapacidad");
@@ -488,7 +493,8 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
   const { precio, nombre } = useTarifas();
   const age = s.birthdate ? computeAge(s.birthdate) : 0;
   const bucket = ageBucket(age);
-  const chosen = bucket.forced ?? s.chosen;
+  const chosen =
+    bucket.forced ?? (bucket.options.includes(s.chosen) ? s.chosen : bucket.options[0]!);
   const finalCategory = resolveCategory(age, chosen, s.hasDisability, precio);
 
   return (
@@ -518,13 +524,14 @@ function Step4({ s, setS }: { s: FormState; setS: (v: FormState) => void }) {
               ))}
             </SelectContent>
           </Select>
-          {bucket.requiresUniversityDoc && chosen === "secundaria" && (
-            <FilePick
-              label="Carnet Universitario/Estudiantil *"
-              file={s.files.university}
-              onFile={(f) => setS({ ...s, files: { ...s.files, university: f } })}
-            />
-          )}
+          {bucket.requiresStudentDoc &&
+            (chosen === "secundaria" || chosen === "universitario") && (
+              <FilePick
+                label="Carnet escolar/universitario *"
+                file={s.files.university}
+                onFile={(f) => setS({ ...s, files: { ...s.files, university: f } })}
+              />
+            )}
         </>
       )}
 

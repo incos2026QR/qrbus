@@ -16,6 +16,7 @@ Hay cuatro sketches independientes. Abre y carga **uno a la vez**:
 5. Para pagos reales, carga el sketch `TrufiDisplayBluetooth` o `TrufiDisplay16x2Bluetooth`, abre la webapp en un navegador compatible con Web Bluetooth y enlaza `Trufi_Hardware_01`.
 
 El Bluetooth BLE y FreeRTOS vienen con el core ESP32 de Arduino; no instales una biblioteca BLE adicional. Cada sketch se compila por separado. La simulación y el modo BLE no se cargan simultáneamente.
+El protocolo BLE distingue Secundaria (`S`) de Universitario (`U`); carga el sketch Bluetooth actualizado para recibir ambas categorías.
 
 ## ST7920 128x64 de la foto
 

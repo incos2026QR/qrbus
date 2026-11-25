@@ -31,7 +31,7 @@ Full-stack fare management app. No landing page — root `/` is the login/regist
 
 ## 3. Registration flows
 
-- **Passenger**: 4-step wizard (credentials → personal → KYC uploads → category with age validation). Categories with age rules enforced client-side and server-side. Extra doc required for Secundaria≥18 (carnet universitario) and Discapacidad (carnet).
+- **Passenger**: 4-step wizard (credentials → personal → KYC uploads → category with age validation). Secondary (15-17) and university (18-27) fares are independent; student ID and disability documents are required when applicable.
 - **Driver**: personal + 4 KYC photos + 4 QR uploads. Server generates unique 5-char code.
 - **"Cargar Datos de Prueba"** button at top: fills all text fields; attaches sample generated placeholder image blobs so uploads work end-to-end.
 

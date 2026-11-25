@@ -711,6 +711,7 @@ export type Database = {
         | "general"
         | "primaria"
         | "secundaria"
+        | "universitario"
         | "adulto_mayor"
         | "discapacidad"
       staff_role: "admin" | "supervisor"
@@ -847,6 +848,7 @@ export const Constants = {
         "general",
         "primaria",
         "secundaria",
+        "universitario",
         "adulto_mayor",
         "discapacidad",
       ],

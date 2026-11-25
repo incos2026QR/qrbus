@@ -4,18 +4,19 @@ import type { Category } from "./categories";
 
 export type Tarifa = { id: string; tipo: string; nombre: string; precio: number };
 
-/** Maps passenger categories to the existing types in `public.tarifas`. */
+/** Maps passenger categories to their independent types in `public.tarifas`. */
 const CATEGORY_TIPO: Record<Category, string> = {
   general: "general",
   primaria: "primaria",
-  secundaria: "universitario",
+  secundaria: "secundaria",
+  universitario: "universitario",
   adulto_mayor: "adulto_mayor",
   discapacidad: "discapacidad",
 };
 
 export function tipoForCategory(c: Category | string | null | undefined): string {
   const key = (c ?? "general") as Category;
-  return CATEGORY_TIPO[key] ?? String(c ?? "general");
+  return CATEGORY_TIPO[key] ?? String(c ?? "general").trim().toLowerCase();
 }
 
 export type MapaTarifas = Record<string, Tarifa>;
@@ -43,7 +44,7 @@ export async function fetchTarifas(force = false) {
       precio: Number(t.precio),
     }));
     const byTipo: MapaTarifas = {};
-    for (const t of list) byTipo[t.tipo] = t;
+    for (const t of list) byTipo[t.tipo.trim().toLowerCase()] = t;
     cache = { list, byTipo };
     inflight = null;
     return cache;
@@ -79,7 +80,7 @@ export function useTarifas() {
   }, []);
 
   const tarifaFor = (c: Category | string | null | undefined): Tarifa | undefined =>
-    byTipo[tipoForCategory(c)];
+    byTipo[tipoForCategory(c).toLowerCase()];
   const precio = (c: Category | string | null | undefined): number =>
     Number(tarifaFor(c)?.precio ?? 0);
   const nombre = (c: Category | string | null | undefined): string =>

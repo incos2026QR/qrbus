@@ -13,7 +13,14 @@ export type Profile = {
   birthdate: string | null;
   phone: string | null;
   email: string | null;
-  category: "general" | "primaria" | "secundaria" | "adulto_mayor" | "discapacidad" | null;
+  category:
+    | "general"
+    | "primaria"
+    | "secundaria"
+    | "universitario"
+    | "adulto_mayor"
+    | "discapacidad"
+    | null;
   driver_code: string | null;
   ci_front_url: string | null;
   ci_back_url: string | null;

@@ -1,4 +1,10 @@
-export type Category = "general" | "primaria" | "secundaria" | "adulto_mayor" | "discapacidad";
+export type Category =
+  | "general"
+  | "primaria"
+  | "secundaria"
+  | "universitario"
+  | "adulto_mayor"
+  | "discapacidad";
 
 /**
  * Categorías admitidas por el enum `fare_category`. Los nombres y precios
@@ -8,6 +14,7 @@ export const ALL_CATEGORIES: Category[] = [
   "general",
   "primaria",
   "secundaria",
+  "universitario",
   "adulto_mayor",
   "discapacidad",
 ];
@@ -31,16 +38,17 @@ export function computeAge(birthdate: string): number {
  * Selección inteligente por edad.
  *  - forced: la categoría queda fija según la edad (sin elección del usuario)
  *  - options: categorías permitidas (la discapacidad se maneja aparte)
- *  - requiresUniversityDoc: si elige "secundaria" debe subir carnet estudiantil
+ *  - requiresStudentDoc: si elige una tarifa estudiantil debe subir su carnet
  */
 export function ageBucket(age: number): {
   forced?: Category;
   options: Category[];
-  requiresUniversityDoc?: boolean;
+  requiresStudentDoc?: boolean;
 } {
   if (age <= 14) return { forced: "primaria", options: ["primaria"] };
   if (age >= 60) return { forced: "adulto_mayor", options: ["adulto_mayor"] };
-  if (age <= 27) return { options: ["secundaria", "general"], requiresUniversityDoc: true };
+  if (age <= 17) return { options: ["secundaria", "general"], requiresStudentDoc: true };
+  if (age <= 27) return { options: ["universitario", "general"], requiresStudentDoc: true };
   return { options: ["general"] };
 }
 
@@ -68,6 +76,7 @@ export function qrColumnFor(
     case "primaria":
       return "qr_primaria_url";
     case "secundaria":
+    case "universitario":
       return "qr_secundaria_url";
     case "adulto_mayor":
     case "discapacidad":
@@ -80,7 +89,9 @@ export function qrColumnFor(
 export function validateCategoryForAge(category: Category, age: number): string | null {
   if (category === "primaria" && age > 17) return "Escolar solo hasta 17 años";
   if (category === "adulto_mayor" && age < 60) return "Adulto Mayor requiere 60+";
-  if (category === "secundaria" && (age < 18 || age > 27)) return "Universitario entre 18 y 27";
+  if (category === "secundaria" && (age < 15 || age > 17)) return "Secundaria entre 15 y 17 años";
+  if (category === "universitario" && (age < 18 || age > 27))
+    return "Universitario entre 18 y 27 años";
   return null;
 }
 

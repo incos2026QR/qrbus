@@ -48,7 +48,8 @@ const char *categoryName(char category) {
   switch (category) {
     case 'G': return "General";
     case 'P': return "Primaria";
-    case 'S': return "Sec./Univ.";
+    case 'S': return "Secundaria";
+    case 'U': return "Universitario";
     case 'A': return "Adulto mayor";
     case 'D': return "Discapacidad";
     default: return "Otro";
@@ -150,7 +151,7 @@ void handleFrame(String frame) {
     uint32_t tickets, amountCents;
     const String category = fields[1];
     if (!receivingPayment || receivedItems >= incomingPayment.itemCount ||
-        category.length() != 1 || String("GPSAD").indexOf(category[0]) < 0 ||
+        category.length() != 1 || String("GPSUAD").indexOf(category[0]) < 0 ||
         !parseUnsigned(fields[2], 10, tickets) || tickets == 0 ||
         !parseUnsigned(fields[3], 999999, amountCents)) {
       reportInvalidFrame("detalle de pasaje invalido");

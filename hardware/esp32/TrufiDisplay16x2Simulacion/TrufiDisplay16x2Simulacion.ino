@@ -45,7 +45,8 @@ const char *categoryName(char category) {
   switch (category) {
     case 'G': return "General";
     case 'P': return "Primaria";
-    case 'S': return "Sec/Univ";
+    case 'S': return "Secundaria";
+    case 'U': return "Univers.";
     case 'A': return "Adulto mayor";
     case 'D': return "Discapacidad";
     default: return "Otro";

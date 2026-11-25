@@ -49,11 +49,11 @@ import {
   Star,
 } from "lucide-react";
 import QRCode from "qrcode";
-import { Switch } from "@/components/ui/switch";
 const CATEGORY_OPTIONS: Category[] = [
   "general",
   "primaria",
   "secundaria",
+  "universitario",
   "adulto_mayor",
   "discapacidad",
 ];
@@ -77,9 +77,31 @@ const IMPROVEMENT_RATING_REASONS = [
   { value: "vehiculo_requiere_mejoras", label: "El vehículo podría mejorar" },
 ] as const;
 
-function getRatingReasons(rating: number) {
-  if (rating === 5) return POSITIVE_RATING_REASONS;
-  return [...POSITIVE_RATING_REASONS, ...IMPROVEMENT_RATING_REASONS];
+function getRatingReasons(rating: number, transactionId: string) {
+  const reasons =
+    rating === 5
+      ? POSITIVE_RATING_REASONS
+      : rating >= 4
+        ? IMPROVEMENT_RATING_REASONS
+        : [...POSITIVE_RATING_REASONS, ...IMPROVEMENT_RATING_REASONS];
+
+  if (reasons.length <= 5) return reasons;
+
+  function hash(value: string) {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result = Math.imul(result ^ value.charCodeAt(index), 16777619);
+    }
+    return result >>> 0;
+  }
+
+  return [...reasons]
+    .sort((left, right) => {
+      const difference =
+        hash(`${transactionId}:${left.value}`) - hash(`${transactionId}:${right.value}`);
+      return difference || left.value.localeCompare(right.value);
+    })
+    .slice(0, 5);
 }
 
 function getRatingReasonLabel(value: string) {
@@ -250,6 +272,8 @@ function PassengerPage() {
   const [companions, setCompanions] = useState<Category[]>([]);
   const [defaultCompanions, setDefaultCompanions] = useState<Category[]>([]);
   const [savingDefaults, setSavingDefaults] = useState(false);
+  const [companionSettingsOpen, setCompanionSettingsOpen] = useState(false);
+  const [companionDraft, setCompanionDraft] = useState<Category[]>([]);
   const [scanning, setScanning] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<{
@@ -266,6 +290,7 @@ function PassengerPage() {
   const [ratingComments, setRatingComments] = useState<Record<string, string>>({});
   const [ratingSavingId, setRatingSavingId] = useState<string | null>(null);
   const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
+  const [historyLimit, setHistoryLimit] = useState<"5" | "10" | "20" | "all">("5");
   const [hideBalance, setHideBalance] = useState(true);
   const [hideAmounts, setHideAmounts] = useState(true);
 
@@ -290,12 +315,13 @@ function PassengerPage() {
 
   const loadHistory = useCallback(async () => {
     if (!userId) return;
-    const { data, error } = await supabase
+    let query = supabase
       .from("transactions")
       .select("id, verification_code, tickets, created_at, amount, fare_breakdown")
       .eq("passenger_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(15);
+      .order("created_at", { ascending: false });
+    if (historyLimit !== "all") query = query.limit(Number(historyLimit));
+    const { data, error } = await query;
     if (error) {
       console.error("Error al cargar transacciones:", error);
       toast.error("No se pudo cargar el historial de transacciones");
@@ -332,7 +358,7 @@ function PassengerPage() {
         comment: ratingsByTransaction.get(transaction.id)?.comment ?? null,
       })),
     );
-  }, [userId]);
+  }, [userId, historyLimit]);
 
   useEffect(() => {
     void loadHistory();
@@ -371,11 +397,15 @@ function PassengerPage() {
     },
     [],
   );
-  const companionsMatchDefaults =
-    companions.length > 0 &&
-    companions.length === defaultCompanions.length &&
-    companions.every((category, index) => category === defaultCompanions[index]);
-
+  const companionDraftSummary = companionDraft.reduce<{ category: Category; count: number }[]>(
+    (summary, category) => {
+      const existing = summary.find((item) => item.category === category);
+      if (existing) existing.count += 1;
+      else summary.push({ category, count: 1 });
+      return summary;
+    },
+    [],
+  );
   function addCompanion() {
     setCompanions((current) => {
       if (current.length >= 9) return current;
@@ -411,7 +441,7 @@ function PassengerPage() {
     setDriver(row);
   }
 
-  async function saveCompanionDefaults(categories: Category[] = companions) {
+  async function saveCompanionDefaults(categories: Category[]): Promise<boolean> {
     setSavingDefaults(true);
     try {
       const { error } = await supabase.rpc("save_my_companion_defaults", {
@@ -419,17 +449,32 @@ function PassengerPage() {
       });
       if (error) throw error;
       setDefaultCompanions(categories);
+      if (driver) setCompanions(categories);
       toast.success(
         categories.length
           ? "Acompañantes guardados para próximos pagos"
           : "Acompañantes predeterminados eliminados",
       );
+      return true;
     } catch (error) {
       console.error("Error al guardar acompañantes predeterminados:", error);
       toast.error(error instanceof Error ? error.message : "No se pudo guardar la configuración");
+      return false;
     } finally {
       setSavingDefaults(false);
     }
+  }
+
+  function addDefaultCompanion() {
+    setCompanionDraft((current) => {
+      if (current.length >= 9) return current;
+      const preferredCategory = profile?.category ?? "general";
+      const category =
+        CATEGORY_OPTIONS.find(
+          (option) => option === preferredCategory && !current.includes(option),
+        ) ?? CATEGORY_OPTIONS.find((option) => !current.includes(option));
+      return category ? [...current, category] : current;
+    });
   }
 
   async function saveRating(transaction: MyTx) {
@@ -684,6 +729,146 @@ function PassengerPage() {
           <p className="text-xs text-muted-foreground">Pasajero activo</p>
         </div>
         <div className="flex gap-1">
+          <Dialog
+            open={companionSettingsOpen}
+            onOpenChange={(open) => {
+              if (open) setCompanionDraft(defaultCompanions);
+              setCompanionSettingsOpen(open);
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
+                aria-label="Configurar acompañantes predeterminados"
+                title="Configurar acompañantes predeterminados"
+              >
+                <Users className="w-4 h-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Acompañantes predeterminados</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Se agregarán automáticamente cada vez que busques un chofer. Puedes ajustarlos
+                  antes de confirmar cada pago.
+                </p>
+                <div className="space-y-2">
+                  {companionDraftSummary.map(({ category, count }) => (
+                    <div
+                      key={category}
+                      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_2rem_1.5rem_2rem] items-center gap-1"
+                    >
+                      <Select
+                        value={category}
+                        onValueChange={(value) => {
+                          const selectedCategory = CATEGORY_OPTIONS.find(
+                            (option) => option === value,
+                          );
+                          if (!selectedCategory) return;
+                          setCompanionDraft((current) =>
+                            current.map((existing) =>
+                              existing === category ? selectedCategory : existing,
+                            ),
+                          );
+                        }}
+                      >
+                        <SelectTrigger className="min-w-0 w-full">
+                          <SelectValue className="min-w-0 flex-1 truncate text-left" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CATEGORY_OPTIONS.filter(
+                            (option) => option === category || !companionDraft.includes(option),
+                          ).map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {nombre(option)} · Bs {precio(option).toFixed(2)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8 shrink-0 border-brand-blue/20 p-0 text-brand-blue hover:bg-brand-blue-light"
+                        aria-label={`Agregar acompañante ${nombre(category)}`}
+                        disabled={companionDraft.length >= 9}
+                        onClick={() =>
+                          setCompanionDraft((current) =>
+                            current.length >= 9 ? current : [...current, category],
+                          )
+                        }
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                      <span
+                        className="min-w-0 text-center text-sm"
+                        aria-label={`${count} acompañantes`}
+                      >
+                        {count}
+                      </span>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8 shrink-0 border-brand-blue/20 p-0 text-brand-blue hover:bg-brand-blue-light"
+                        aria-label={`Quitar acompañante ${nombre(category)}`}
+                        onClick={() =>
+                          setCompanionDraft((current) => {
+                            const index = current.indexOf(category);
+                            return index < 0 ? current : current.filter((_, i) => i !== index);
+                          })
+                        }
+                      >
+                        <Minus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full border-brand-blue text-brand-blue hover:bg-brand-blue-light"
+                  disabled={
+                    companionDraft.length >= 9 ||
+                    CATEGORY_OPTIONS.every((option) => companionDraft.includes(option))
+                  }
+                  onClick={addDefaultCompanion}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Agregar acompañante
+                </Button>
+                <p className="text-right text-xs text-muted-foreground">
+                  {companionDraft.length} de 9 acompañantes
+                </p>
+                <div className="flex justify-end gap-2 border-t pt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-brand-blue/20 text-brand-blue hover:bg-brand-blue-light"
+                    onClick={() => setCompanionSettingsOpen(false)}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-brand-blue text-white hover:bg-brand-blue-dark focus-visible:ring-brand-orange"
+                    disabled={savingDefaults}
+                    onClick={async () => {
+                      if (await saveCompanionDefaults(companionDraft)) {
+                        setCompanionSettingsOpen(false);
+                      }
+                    }}
+                  >
+                    {savingDefaults && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Guardar
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
           <Button
             size="sm"
             variant="ghost"
@@ -835,41 +1020,6 @@ function PassengerPage() {
                 <Plus className="w-4 h-4 mr-2" /> Agregar acompañante
               </Button>
 
-              <div className="flex items-start gap-2 border-t pt-3">
-                <Switch
-                  id="save-companion-defaults"
-                  checked={companionsMatchDefaults}
-                  onCheckedChange={(checked) => {
-                    if (checked) void saveCompanionDefaults();
-                    else void saveCompanionDefaults([]);
-                  }}
-                  disabled={
-                    savingDefaults || (companions.length === 0 && defaultCompanions.length === 0)
-                  }
-                  aria-label="Guardar acompañantes para próximos pagos"
-                />
-                <div className="space-y-1">
-                  <Label htmlFor="save-companion-defaults" className="text-sm font-medium">
-                    Guardar acompañantes predeterminados
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Se agregarán automáticamente al buscar un chofer.
-                  </p>
-                  {defaultCompanions.length > 0 && !companionsMatchDefaults && (
-                    <Button
-                      type="button"
-                      variant="link"
-                      className="h-auto p-0 text-xs text-brand-blue"
-                      onClick={() => void saveCompanionDefaults([])}
-                      disabled={savingDefaults}
-                    >
-                      Quitar los guardados sin cambiar este pago
-                    </Button>
-                  )}
-                </div>
-                {savingDefaults && <Loader2 className="ml-auto h-4 w-4 animate-spin" />}
-              </div>
-
               <div className="mt-1 text-sm space-y-1">
                 <div className="flex justify-between">
                   <span>{nombre(profile.category ?? "general")}</span>
@@ -1008,15 +1158,35 @@ function PassengerPage() {
           <h3 className="font-semibold flex items-center gap-2 text-sm">
             <History className="w-4 h-4" /> Mis transacciones
           </h3>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
-            aria-label={hideAmounts ? "Mostrar montos" : "Ocultar montos"}
-            onClick={() => setHideAmounts((v) => !v)}
-          >
-            {hideAmounts ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </Button>
+          <div className="flex items-center gap-1">
+            <Select
+              value={historyLimit}
+              onValueChange={(value) => {
+                if (value === "5" || value === "10" || value === "20" || value === "all") {
+                  setHistoryLimit(value);
+                }
+              }}
+            >
+              <SelectTrigger className="h-8 w-[128px] text-xs" aria-label="Cantidad de transacciones">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">Últimas 5</SelectItem>
+                <SelectItem value="10">Últimas 10</SelectItem>
+                <SelectItem value="20">Últimas 20</SelectItem>
+                <SelectItem value="all">Todas</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 text-brand-blue hover:bg-brand-orange-light hover:text-brand-blue-dark"
+              aria-label={hideAmounts ? "Mostrar montos" : "Ocultar montos"}
+              onClick={() => setHideAmounts((v) => !v)}
+            >
+              {hideAmounts ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </Button>
+          </div>
         </div>
         <div className="divide-y text-sm">
           {history.map((t) => (
@@ -1058,10 +1228,8 @@ function PassengerPage() {
                 </Button>
               </div>
               {expandedTransactionId === t.id && (
-                <div className="pl-1">
+                <div className="space-y-3 pl-1">
                   <FareBreakdown transaction={t} nombre={nombre} hideAmounts={hideAmounts} />
-                </div>
-              )}
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t pt-2">
                 {typeof t.rating === "number" ? (
                   <div className="w-full space-y-2">
@@ -1095,7 +1263,7 @@ function PassengerPage() {
                         onChange={(rating) => {
                           setRatingSelections((current) => ({ ...current, [t.id]: rating }));
                           const allowedReasons = new Set<string>(
-                            getRatingReasons(rating).map((reason) => reason.value),
+                            getRatingReasons(rating, t.id).map((reason) => reason.value),
                           );
                           setRatingReasonSelections((current) => ({
                             ...current,
@@ -1111,11 +1279,13 @@ function PassengerPage() {
                       <>
                         <div className="space-y-2">
                           <p className="text-xs text-muted-foreground">
-                            {ratingSelections[t.id] >= 4
-                              ? "¿Qué aspectos destacas o podrían mejorar?"
-                              : "¿Qué aspectos salieron bien o podrían mejorar?"}
+                            {ratingSelections[t.id] === 5
+                              ? "¿Qué aspectos destacas?"
+                              : ratingSelections[t.id] >= 4
+                                ? "¿Qué aspectos podrían mejorar?"
+                                : "¿Qué aspectos salieron bien o podrían mejorar?"}
                           </p>
-                          {getRatingReasons(ratingSelections[t.id]).map((reason) => {
+                          {getRatingReasons(ratingSelections[t.id], t.id).map((reason) => {
                             const selected = (
                               ratingReasonSelections[t.id] ?? []
                             ).includes(reason.value);
@@ -1181,11 +1351,39 @@ function PassengerPage() {
                           )}
                           Enviar calificación
                         </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="ml-2 border-brand-blue/20 text-brand-blue hover:bg-brand-blue-light"
+                          disabled={ratingSavingId === t.id}
+                          onClick={() => {
+                            setRatingSelections((current) => {
+                              const next = { ...current };
+                              delete next[t.id];
+                              return next;
+                            });
+                            setRatingReasonSelections((current) => {
+                              const next = { ...current };
+                              delete next[t.id];
+                              return next;
+                            });
+                            setRatingComments((current) => {
+                              const next = { ...current };
+                              delete next[t.id];
+                              return next;
+                            });
+                          }}
+                        >
+                          Cancelar
+                        </Button>
                       </>
                     )}
                   </div>
                 )}
               </div>
+                </div>
+              )}
             </div>
           ))}
           {history.length === 0 && (

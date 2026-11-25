@@ -29,7 +29,7 @@ DELETE FROM auth.users WHERE id IS NOT NULL;
 -- 1. Enums ----------------------------------------------------------------------
 DO $$ BEGIN CREATE TYPE public.app_role AS ENUM ('admin','supervisor','passenger','driver');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN CREATE TYPE public.fare_category AS ENUM ('general','primaria','secundaria','adulto_mayor','discapacidad');
+DO $$ BEGIN CREATE TYPE public.fare_category AS ENUM ('general','primaria','secundaria','universitario','adulto_mayor','discapacidad');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE public.user_status AS ENUM ('pending','active','rejected','suspended');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -209,7 +209,7 @@ BEGIN
       NEW.raw_user_meta_data ->> 'phone', NEW.email,
       NEW.raw_user_meta_data ->> 'bank_name', NEW.raw_user_meta_data ->> 'bank_account',
       CASE WHEN NEW.raw_user_meta_data ->> 'fare_category' IN
-        ('general','primaria','secundaria','adulto_mayor','discapacidad')
+        ('general','primaria','secundaria','universitario','adulto_mayor','discapacidad')
         THEN (NEW.raw_user_meta_data ->> 'fare_category')::public.fare_category
         ELSE 'general'::public.fare_category END
     );
@@ -306,7 +306,7 @@ CREATE POLICY "tarifas admin gestiona" ON public.tarifas FOR ALL TO authenticate
   USING (public.has_role(auth.uid(),'admin')) WITH CHECK (public.has_role(auth.uid(),'admin'));
 INSERT INTO public.tarifas (tipo, nombre, precio) VALUES
   ('general','General',2.00),('adulto_mayor','Adulto Mayor',1.00),('discapacidad','Persona con Discapacidad',1.00),
-  ('primaria','Primaria',0.80),('secundaria','Secundaria / Universitario',1.00)
+  ('primaria','Primaria',0.80),('secundaria','Secundaria',1.00),('universitario','Universitario',1.00)
 ON CONFLICT (tipo) DO NOTHING;
 
 -- 6. Movimientos ----------------------------------------------------------------
@@ -373,11 +373,7 @@ CREATE TRIGGER trg_reports_updated_at BEFORE UPDATE ON public.reports
 CREATE OR REPLACE FUNCTION public.fare_for_category(_c public.fare_category)
 RETURNS numeric LANGUAGE sql STABLE SET search_path = public AS $$
   SELECT coalesce(
-    (SELECT precio FROM public.tarifas
-     WHERE tipo = CASE _c
-       WHEN 'secundaria'::public.fare_category THEN 'universitario'
-       ELSE _c::text
-     END),
+    (SELECT precio FROM public.tarifas WHERE lower(trim(tipo)) = lower(_c::text)),
     2.0
   )::numeric
 $$;

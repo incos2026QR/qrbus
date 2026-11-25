@@ -52,6 +52,7 @@ const CATEGORY_CODES: Record<string, string> = {
   general: "G",
   primaria: "P",
   secundaria: "S",
+  universitario: "U",
   adulto_mayor: "A",
   discapacidad: "D",
 };
