@@ -611,6 +611,13 @@ export type Database = {
         }
         Relationships: []
       }
+      driver_rating_report_comments: {
+        Row: {
+          comments: Json | null
+          driver_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       complete_bank_withdrawal: {

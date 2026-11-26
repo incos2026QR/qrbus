@@ -29,11 +29,13 @@ import {
   CheckCircle2,
   XCircle,
   Ban,
+  Star,
   Menu,
   Receipt,
   MapPin,
   Download,
   FileText,
+  DollarSign,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cleanAccount, formatAccount } from "@/lib/bank";
@@ -42,12 +44,87 @@ import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import { createSupervisor, updateSupervisor, updateSupervisorPassword } from "@/lib/auth.functions";
 import { STATUS_LABELS, ALL_CATEGORIES, type Category } from "@/lib/categories";
-import { useTarifas } from "@/lib/tarifas";
+import { fetchTarifas, tipoForCategory, useTarifas, type Tarifa } from "@/lib/tarifas";
 import { useBancos } from "@/lib/catalogs";
 
 export const Route = createFileRoute("/admin")({ ssr: false, component: AdminPage });
 
-type Tab = "drivers" | "passengers" | "supervisors" | "transactions" | "reports";
+type Tab = "drivers" | "passengers" | "supervisors" | "transactions" | "reports" | "tariffs";
+
+const DRIVER_RATING_BUCKETS = [
+  { rating: 0.5, field: "rating_0_5_count" },
+  { rating: 1, field: "rating_1_count" },
+  { rating: 1.5, field: "rating_1_5_count" },
+  { rating: 2, field: "rating_2_count" },
+  { rating: 2.5, field: "rating_2_5_count" },
+  { rating: 3, field: "rating_3_count" },
+  { rating: 3.5, field: "rating_3_5_count" },
+  { rating: 4, field: "rating_4_count" },
+  { rating: 4.5, field: "rating_4_5_count" },
+  { rating: 5, field: "rating_5_count" },
+] as const;
+const DRIVER_RATING_COLORS = [
+  "#dc2626",
+  "#ea580c",
+  "#d97706",
+  "#ca8a04",
+  "#65a30d",
+  "#16a34a",
+  "#0d9488",
+  "#0284c7",
+  "#2563eb",
+  "#7c3aed",
+];
+const DRIVER_RATING_REASONS = [
+  { value: "trato_amable", label: "Trato amable" },
+  { value: "conduccion_segura", label: "Conducción segura" },
+  { value: "cobro_correcto", label: "Cobro correcto" },
+  { value: "respeto_pasaje_diferenciado", label: "Respeto al pasaje diferenciado" },
+  { value: "vehiculo_buen_estado", label: "Vehículo en buenas condiciones" },
+  { value: "trato_mejorable", label: "El trato podría mejorar" },
+  { value: "conduccion_puede_mejorar", label: "La conducción podría mejorar" },
+  { value: "cobro_puede_mejorar", label: "El cobro podría ser más claro" },
+  {
+    value: "respeto_pasaje_diferenciado_puede_mejorar",
+    label: "Podría mejorar el respeto al pasaje diferenciado",
+  },
+  { value: "vehiculo_requiere_mejoras", label: "El vehículo podría mejorar" },
+];
+
+type DriverRatingStats = {
+  totalRatings: number;
+  averageRating: number | null;
+  ratedDrivers: number;
+  buckets: { rating: number; count: number; percentage: number }[];
+};
+
+type IndividualDriverRatingStats = {
+  totalRatings: number;
+  averageRating: number | null;
+  reasons: { value: string; label: string; count: number; percentage: number }[];
+  comments: { rating: number; comment: string; createdAt: string }[];
+};
+
+function isJsonRecord(value: Json): value is { [key: string]: Json | undefined } {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseDriverRatingComments(value: Json | null) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isJsonRecord(entry)) return [];
+    const comment = typeof entry.comment === "string" ? entry.comment.trim() : "";
+    const rating = typeof entry.rating === "number" ? entry.rating : Number(entry.rating);
+    if (!comment || !Number.isFinite(rating)) return [];
+    return [
+      {
+        rating,
+        comment,
+        createdAt: typeof entry.created_at === "string" ? entry.created_at : "",
+      },
+    ];
+  });
+}
 
 function normalizeProfileStatus(status?: string | null): Profile["status"] {
   const normalized = String(status ?? "")
@@ -141,6 +218,18 @@ function AdminPage() {
       >
         Denuncias
       </NavBtn>
+      {isAdmin && (
+        <NavBtn
+          active={tab === "tariffs"}
+          onClick={() => {
+            setTab("tariffs");
+            setDrawerOpen(false);
+          }}
+          icon={<DollarSign className="w-4 h-4" />}
+        >
+          Tarifas
+        </NavBtn>
+      )}
     </>
   );
 
@@ -166,7 +255,7 @@ function AdminPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-blue-light/40 via-background to-brand-orange-light/30 md:flex">
       {/* Desktop sidebar */}
-      <aside className="hidden w-60 flex-col bg-brand-blue-dark text-white md:flex">
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-brand-blue-dark text-white md:flex">
         {brandBlock}
         <nav className="flex-1 p-2 space-y-1">{nav}</nav>
         <div className="border-t border-white/15 p-2">{signOut}</div>
@@ -199,6 +288,7 @@ function AdminPage() {
         {tab === "supervisors" && isAdmin && <UserTable role="supervisor" onChange={refresh} />}
         {tab === "transactions" && <TransactionsPanel />}
         {tab === "reports" && <ReportsPanel />}
+        {tab === "tariffs" && isAdmin && <TariffsPanel />}
       </main>
     </div>
   );
@@ -238,9 +328,20 @@ function UserTable({
   onChange: () => void;
 }) {
   const isSupervisors = role === "supervisor";
-  const [subtab, setSubtab] = useState<"pending" | "active">(isSupervisors ? "active" : "pending");
+  const [subtab, setSubtab] = useState<"pending" | "active" | "suspendedRejected">(
+    isSupervisors ? "active" : "pending",
+  );
   const [rows, setRows] = useState<Profile[]>([]);
   const [selected, setSelected] = useState<Profile | null>(null);
+  const [driverRatingStatsOpen, setDriverRatingStatsOpen] = useState(false);
+  const [driverRatingStatsLoading, setDriverRatingStatsLoading] = useState(false);
+  const [driverRatingStatsError, setDriverRatingStatsError] = useState("");
+  const [driverRatingStats, setDriverRatingStats] = useState<DriverRatingStats | null>(null);
+  const [selectedRatingDriver, setSelectedRatingDriver] = useState<Profile | null>(null);
+  const [individualRatingStatsLoading, setIndividualRatingStatsLoading] = useState(false);
+  const [individualRatingStatsError, setIndividualRatingStatsError] = useState("");
+  const [individualRatingStats, setIndividualRatingStats] =
+    useState<IndividualDriverRatingStats | null>(null);
   const [overrideCategory, setOverrideCategory] = useState<Category | "">("");
   const [bankAccount, setBankAccount] = useState("");
   const [bankName, setBankName] = useState("");
@@ -309,6 +410,176 @@ function UserTable({
     load();
   }, [role]);
 
+  async function openDriverRatingStats() {
+    setDriverRatingStatsOpen(true);
+    setDriverRatingStatsLoading(true);
+    setDriverRatingStatsError("");
+    try {
+      const { data, error } = await supabase.from("driver_rating_report_summary").select("*");
+      if (error) throw new Error(error.message);
+
+      const buckets = DRIVER_RATING_BUCKETS.map(({ rating, field }) => ({
+        rating,
+        count: (data ?? []).reduce((total, row) => total + Number(row[field] ?? 0), 0),
+      }));
+      const totalRatings = buckets.reduce((total, bucket) => total + bucket.count, 0);
+      const ratingPoints = buckets.reduce(
+        (total, bucket) => total + bucket.rating * bucket.count,
+        0,
+      );
+      setDriverRatingStats({
+        totalRatings,
+        averageRating: totalRatings ? ratingPoints / totalRatings : null,
+        ratedDrivers: (data ?? []).filter((row) => Number(row.rating_count ?? 0) > 0).length,
+        buckets: buckets.map((bucket) => ({
+          ...bucket,
+          percentage: totalRatings ? (bucket.count / totalRatings) * 100 : 0,
+        })),
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudieron cargar las calificaciones";
+      setDriverRatingStatsError(message);
+      toast.error(message);
+    } finally {
+      setDriverRatingStatsLoading(false);
+    }
+  }
+
+  async function openIndividualDriverRatings(driver: Profile) {
+    setSelectedRatingDriver(driver);
+    setIndividualRatingStatsLoading(true);
+    setIndividualRatingStatsError("");
+    setIndividualRatingStats(null);
+    try {
+      const [summaryResult, commentsResult] = await Promise.all([
+        supabase
+          .from("driver_rating_report_summary")
+          .select("rating_count, average_rating, selected_reason_counts")
+          .eq("driver_id", driver.id)
+          .maybeSingle(),
+        supabase
+          .from("driver_rating_report_comments")
+          .select("comments")
+          .eq("driver_id", driver.id)
+          .maybeSingle(),
+      ]);
+      if (summaryResult.error) throw new Error(summaryResult.error.message);
+      if (commentsResult.error) throw new Error(commentsResult.error.message);
+
+      const totalRatings = Number(summaryResult.data?.rating_count ?? 0);
+      const rawReasonCounts = summaryResult.data?.selected_reason_counts;
+      const reasonCounts = rawReasonCounts && isJsonRecord(rawReasonCounts) ? rawReasonCounts : {};
+      setIndividualRatingStats({
+        totalRatings,
+        averageRating:
+          summaryResult.data?.average_rating === null ||
+          summaryResult.data?.average_rating === undefined
+            ? null
+            : Number(summaryResult.data.average_rating),
+        reasons: DRIVER_RATING_REASONS.map((reason) => {
+          const count = Number(reasonCounts[reason.value] ?? 0);
+          return {
+            ...reason,
+            count,
+            percentage: totalRatings ? (count / totalRatings) * 100 : 0,
+          };
+        }),
+        comments: parseDriverRatingComments(commentsResult.data?.comments ?? null),
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudieron cargar las calificaciones";
+      setIndividualRatingStatsError(message);
+      toast.error(message);
+    } finally {
+      setIndividualRatingStatsLoading(false);
+    }
+  }
+
+  function exportDriverRatingStats() {
+    if (!driverRatingStats) return;
+    try {
+      const summarySheet = XLSX.utils.json_to_sheet([
+        {
+          "Total de calificaciones": driverRatingStats.totalRatings,
+          "Promedio general": driverRatingStats.averageRating
+            ? Number(driverRatingStats.averageRating.toFixed(2))
+            : "Sin calificaciones",
+          "Choferes calificados": driverRatingStats.ratedDrivers,
+        },
+      ]);
+      const distributionSheet = XLSX.utils.json_to_sheet(
+        driverRatingStats.buckets.map((bucket) => ({
+          Calificación: bucket.rating,
+          Total: bucket.count,
+          Porcentaje: bucket.percentage / 100,
+        })),
+      );
+      for (let row = 2; row <= driverRatingStats.buckets.length + 1; row += 1) {
+        const percentageCell = distributionSheet[`C${row}`];
+        if (percentageCell) percentageCell.z = "0.00%";
+      }
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, summarySheet, "Resumen");
+      XLSX.utils.book_append_sheet(workbook, distributionSheet, "Calificaciones");
+      XLSX.writeFile(workbook, "estadisticas-calificaciones-choferes.xlsx");
+      toast.success("Estadísticas exportadas a Excel");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "No se pudo exportar las estadísticas a Excel",
+      );
+    }
+  }
+
+  async function downloadDriverRatingImage() {
+    const svg = document.getElementById("driver-rating-chart");
+    if (!(svg instanceof SVGSVGElement)) {
+      toast.error("No se encontró la gráfica de calificaciones");
+      return;
+    }
+
+    const imageUrl = URL.createObjectURL(
+      new Blob([new XMLSerializer().serializeToString(svg)], {
+        type: "image/svg+xml;charset=utf-8",
+      }),
+    );
+    try {
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("No se pudo preparar la gráfica"));
+        image.src = imageUrl;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = svg.viewBox.baseVal.width;
+      canvas.height = svg.viewBox.baseVal.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("No se pudo crear la imagen para descargar");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!png) throw new Error("No se pudo generar el archivo PNG");
+
+      const downloadUrl = URL.createObjectURL(png);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = "estadisticas-calificaciones-choferes.png";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+      toast.success("Imagen descargada");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo descargar la gráfica");
+    } finally {
+      URL.revokeObjectURL(imageUrl);
+    }
+  }
+
   useEffect(() => {
     setOverrideCategory((selected?.category as Category | null) ?? "");
     setBankAccount(cleanAccount(selected?.bank_account ?? ""));
@@ -331,7 +602,15 @@ function UserTable({
 
   const filtered = isSupervisors
     ? rows
-    : rows.filter((r) => (subtab === "pending" ? r.status === "pending" : r.status !== "pending"));
+    : rows.filter((row) => {
+        if (subtab === "pending") return row.status === "pending";
+        if (subtab === "active") return row.status === "active";
+        return row.status === "suspended" || row.status === "rejected";
+      });
+  const maxDriverRatingCount = Math.max(
+    1,
+    ...(driverRatingStats?.buckets.map((bucket) => bucket.count) ?? []),
+  );
 
   async function saveCategory() {
     if (!selected || !overrideCategory) return;
@@ -369,13 +648,30 @@ function UserTable({
 
   return (
     <Card className="max-w-full overflow-hidden border-brand-blue/15 p-4 shadow-md">
-      <h2 className="text-xl font-bold capitalize mb-3">
-        {role === "driver" ? "Choferes" : role === "passenger" ? "Pasajeros" : "Supervisores"}
-      </h2>
-      {isSupervisors && <AddSupervisor onCreated={load} />}
-      <Tabs value={subtab} onValueChange={(v) => setSubtab(v as "pending" | "active")}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-bold capitalize">
+          {role === "driver" ? "Choferes" : role === "passenger" ? "Pasajeros" : "Supervisores"}
+        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {role === "driver" && (
+            <Button
+              variant="outline"
+              className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+              onClick={openDriverRatingStats}
+              disabled={driverRatingStatsLoading}
+            >
+              <BarChart3 className="mr-1 h-4 w-4" /> Estadísticas de calificaciones
+            </Button>
+          )}
+          {isSupervisors && <AddSupervisor onCreated={load} />}
+        </div>
+      </div>
+      <Tabs
+        value={subtab}
+        onValueChange={(v) => setSubtab(v as "pending" | "active" | "suspendedRejected")}
+      >
         {!isSupervisors && (
-          <TabsList className="bg-brand-blue-light/70">
+          <TabsList className="h-auto flex-wrap bg-brand-blue-light/70">
             <TabsTrigger
               value="pending"
               className="text-brand-blue-dark data-[state=active]:bg-brand-blue data-[state=active]:text-white"
@@ -387,6 +683,14 @@ function UserTable({
               className="text-brand-blue-dark data-[state=active]:bg-brand-blue data-[state=active]:text-white"
             >
               Inscritos / Activos
+            </TabsTrigger>
+            <TabsTrigger
+              value="suspendedRejected"
+              className="text-brand-blue-dark data-[state=active]:bg-brand-blue data-[state=active]:text-white"
+            >
+              Suspendidos / Rechazados (
+              {rows.filter((row) => row.status === "suspended" || row.status === "rejected").length}
+              )
             </TabsTrigger>
           </TabsList>
         )}
@@ -415,6 +719,18 @@ function UserTable({
                   </div>
                 </div>
                 <StatusBadge status={r.status} />
+                {role === "driver" && (r.status === "active" || r.status === "suspended") && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+                    onClick={() => openIndividualDriverRatings(r)}
+                    disabled={individualRatingStatsLoading}
+                    aria-label={`Ver calificaciones de ${r.first_name ?? "chofer"}`}
+                  >
+                    <Star className="mr-1 h-4 w-4" /> Calificaciones
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
@@ -428,6 +744,261 @@ function UserTable({
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={driverRatingStatsOpen} onOpenChange={setDriverRatingStatsOpen}>
+        <DialogContent className="max-h-[90vh] w-[95vw] max-w-4xl overflow-y-auto border-brand-blue/20">
+          <DialogHeader>
+            <DialogTitle>Estadísticas de calificaciones de choferes</DialogTitle>
+          </DialogHeader>
+          {driverRatingStatsLoading ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Cargando estadísticas...
+            </p>
+          ) : driverRatingStatsError ? (
+            <div className="space-y-3">
+              <p className="text-sm text-destructive">{driverRatingStatsError}</p>
+              <Button variant="outline" onClick={openDriverRatingStats}>
+                Reintentar
+              </Button>
+            </div>
+          ) : driverRatingStats ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Calificaciones recibidas</p>
+                  <p className="text-xl font-semibold">{driverRatingStats.totalRatings}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Promedio general</p>
+                  <p className="text-xl font-semibold">
+                    {driverRatingStats.averageRating?.toFixed(2) ?? "—"} / 5
+                  </p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Choferes calificados</p>
+                  <p className="text-xl font-semibold">{driverRatingStats.ratedDrivers}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  variant="outline"
+                  className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+                  onClick={exportDriverRatingStats}
+                >
+                  <Download className="mr-1 h-4 w-4" /> Descargar Excel
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+                  onClick={downloadDriverRatingImage}
+                  disabled={driverRatingStats.totalRatings === 0}
+                >
+                  <Download className="mr-1 h-4 w-4" /> Descargar imagen
+                </Button>
+              </div>
+              {driverRatingStats.totalRatings > 0 ? (
+                <div className="overflow-x-auto">
+                  <svg
+                    id="driver-rating-chart"
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="760"
+                    height="360"
+                    viewBox="0 0 760 360"
+                    role="img"
+                    aria-label="Distribución total y porcentual de calificaciones de choferes"
+                    className="block min-w-[700px] bg-white"
+                  >
+                    <rect width="760" height="360" fill="#ffffff" />
+                    <text x="30" y="28" fontSize="18" fontWeight="600" fill="#111827">
+                      Calificaciones de usuarios a choferes
+                    </text>
+                    <text x="30" y="50" fontSize="12" fill="#475569">
+                      Total: {driverRatingStats.totalRatings} · Promedio:{" "}
+                      {driverRatingStats.averageRating?.toFixed(2)} / 5
+                    </text>
+                    <line x1="35" y1="280" x2="735" y2="280" stroke="#cbd5e1" />
+                    {driverRatingStats.buckets.map((bucket, index) => {
+                      const slotWidth = 70;
+                      const x = 35 + index * slotWidth;
+                      const barHeight = (bucket.count / maxDriverRatingCount) * 190;
+                      const y = 270 - barHeight;
+                      return (
+                        <g key={bucket.rating}>
+                          <title>
+                            {bucket.rating} estrellas: {bucket.count} (
+                            {bucket.percentage.toFixed(1)}%)
+                          </title>
+                          <rect
+                            x={x + 14}
+                            y={y}
+                            width="42"
+                            height={barHeight}
+                            rx="4"
+                            fill={DRIVER_RATING_COLORS[index]}
+                          />
+                          <text
+                            x={x + 35}
+                            y={y - 8}
+                            textAnchor="middle"
+                            fontSize="12"
+                            fill="#111827"
+                          >
+                            {bucket.count}
+                          </text>
+                          <text x={x + 35} y="300" textAnchor="middle" fontSize="11" fill="#475569">
+                            {bucket.percentage.toFixed(1)}%
+                          </text>
+                          <text x={x + 35} y="322" textAnchor="middle" fontSize="12" fill="#111827">
+                            {bucket.rating.toLocaleString("es")}★
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              ) : (
+                <p className="rounded-md border p-4 text-center text-sm text-muted-foreground">
+                  Todavía no hay calificaciones registradas.
+                </p>
+              )}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[420px] text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                      <th className="py-2 pr-3">Calificación</th>
+                      <th className="py-2 pr-3">Total</th>
+                      <th className="py-2">Porcentaje</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {driverRatingStats.buckets.map((bucket) => (
+                      <tr key={bucket.rating}>
+                        <td className="py-2 pr-3">
+                          {bucket.rating.toLocaleString("es")} estrellas
+                        </td>
+                        <td className="py-2 pr-3">{bucket.count}</td>
+                        <td className="py-2">{bucket.percentage.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={selectedRatingDriver !== null}
+        onOpenChange={(open) => !open && setSelectedRatingDriver(null)}
+      >
+        <DialogContent className="max-h-[90vh] w-[95vw] max-w-3xl overflow-y-auto border-brand-blue/20">
+          <DialogHeader>
+            <DialogTitle>
+              Calificaciones de {selectedRatingDriver?.first_name}{" "}
+              {selectedRatingDriver?.paternal_surname}
+            </DialogTitle>
+          </DialogHeader>
+          {individualRatingStatsLoading ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Cargando calificaciones...
+            </p>
+          ) : individualRatingStatsError ? (
+            <div className="space-y-3">
+              <p className="text-sm text-destructive">{individualRatingStatsError}</p>
+              {selectedRatingDriver && (
+                <Button
+                  variant="outline"
+                  onClick={() => openIndividualDriverRatings(selectedRatingDriver)}
+                >
+                  Reintentar
+                </Button>
+              )}
+            </div>
+          ) : individualRatingStats ? (
+            <div className="space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Calificaciones recibidas</p>
+                  <p className="text-xl font-semibold">{individualRatingStats.totalRatings}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Promedio en estrellas</p>
+                  <p className="flex items-center gap-1 text-xl font-semibold">
+                    <Star className="h-5 w-5 fill-current text-amber-500" />
+                    {individualRatingStats.averageRating?.toFixed(2) ?? "—"} / 5
+                  </p>
+                </div>
+              </div>
+              {individualRatingStats.totalRatings > 0 ? (
+                <section className="space-y-2">
+                  <div>
+                    <h3 className="font-semibold">Respuestas predeterminadas</h3>
+                    <p className="text-xs text-muted-foreground">
+                      El porcentaje se calcula sobre el total de calificaciones; una persona pudo
+                      seleccionar varias respuestas.
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[480px] text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                          <th className="py-2 pr-3">Respuesta</th>
+                          <th className="py-2 pr-3">Veces recibida</th>
+                          <th className="py-2">Porcentaje</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {individualRatingStats.reasons.map((reason) => (
+                          <tr key={reason.value}>
+                            <td className="py-2 pr-3">{reason.label}</td>
+                            <td className="py-2 pr-3">{reason.count}</td>
+                            <td className="py-2">{reason.percentage.toFixed(2)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ) : (
+                <p className="rounded-md border p-3 text-sm text-muted-foreground">
+                  Este chofer aún no recibió calificaciones.
+                </p>
+              )}
+              <section className="space-y-2">
+                <h3 className="font-semibold">Comentarios opcionales</h3>
+                {individualRatingStats.comments.length > 0 ? (
+                  <div className="space-y-2">
+                    {individualRatingStats.comments.map((comment, index) => (
+                      <article
+                        key={`${comment.createdAt}-${index}`}
+                        className="rounded-md border p-3"
+                      >
+                        <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            <Star className="h-3.5 w-3.5 fill-current text-amber-500" />
+                            {comment.rating.toLocaleString("es")} / 5
+                          </span>
+                          {comment.createdAt && (
+                            <time dateTime={comment.createdAt}>
+                              {new Date(comment.createdAt).toLocaleString("es")}
+                            </time>
+                          )}
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm">{comment.comment}</p>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-md border p-3 text-sm text-muted-foreground">
+                    No hay comentarios opcionales.
+                  </p>
+                )}
+              </section>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
         <DialogContent className="max-h-[90vh] w-[95vw] max-w-3xl overflow-y-auto border-brand-blue/20">
@@ -626,6 +1197,192 @@ function UserTable({
             ))}
         </DialogContent>
       </Dialog>
+    </Card>
+  );
+}
+
+const CATEGORY_TARIFF_LABELS: Record<Category, string> = {
+  general: "General",
+  primaria: "Primaria",
+  secundaria: "Secundaria",
+  universitario: "Universitario",
+  adulto_mayor: "Adulto mayor",
+  discapacidad: "Persona con discapacidad",
+};
+
+function TariffsPanel() {
+  const [tariffs, setTariffs] = useState<Tarifa[]>([]);
+  const [priceDrafts, setPriceDrafts] = useState<Partial<Record<Category, string>>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [savingCategory, setSavingCategory] = useState<Category | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError("");
+    fetchTarifas(true)
+      .then(({ list }) => {
+        if (!active) return;
+        setTariffs(list);
+        setPriceDrafts(
+          Object.fromEntries(
+            ALL_CATEGORIES.map((category) => {
+              const tarifa = list.find(
+                (entry) => entry.tipo.trim().toLowerCase() === tipoForCategory(category),
+              );
+              return [category, tarifa ? tarifa.precio.toFixed(2) : ""];
+            }),
+          ),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        const message =
+          error instanceof Error ? error.message : "No se pudieron cargar las tarifas";
+        setLoadError(message);
+        toast.error(message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [reloadKey]);
+
+  async function saveTariff(category: Category) {
+    const rawPrice = priceDrafts[category] ?? "";
+    const price = Number(rawPrice);
+    if (
+      !rawPrice.trim() ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      price > 99999999.99 ||
+      Math.abs(price * 100 - Math.round(price * 100)) > 1e-8
+    ) {
+      toast.error("Ingresa una tarifa válida con hasta dos decimales");
+      return;
+    }
+
+    const tipo = tipoForCategory(category);
+    const existing = tariffs.find((entry) => entry.tipo.trim().toLowerCase() === tipo);
+    setSavingCategory(category);
+    try {
+      const result = existing
+        ? await supabase
+            .from("tarifas")
+            .update({ precio: price })
+            .eq("id", existing.id)
+            .select("id, tipo, nombre, precio")
+            .single()
+        : await supabase
+            .from("tarifas")
+            .insert({ tipo, nombre: CATEGORY_TARIFF_LABELS[category], precio: price })
+            .select("id, tipo, nombre, precio")
+            .single();
+      if (result.error) throw new Error(result.error.message);
+
+      const savedTariff: Tarifa = { ...result.data, precio: Number(result.data.precio) };
+      setTariffs((current) =>
+        existing
+          ? current.map((entry) => (entry.id === existing.id ? savedTariff : entry))
+          : [...current, savedTariff],
+      );
+      setPriceDrafts((current) => ({ ...current, [category]: savedTariff.precio.toFixed(2) }));
+
+      try {
+        const refreshed = await fetchTarifas(true);
+        setTariffs(refreshed.list);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "No se pudieron recargar las tarifas";
+        toast.error(`La tarifa se guardó, pero no se pudo actualizar la caché: ${message}`);
+        return;
+      }
+      toast.success(`Tarifa de ${CATEGORY_TARIFF_LABELS[category]} actualizada`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar la tarifa");
+    } finally {
+      setSavingCategory(null);
+    }
+  }
+
+  const tariffRows = ALL_CATEGORIES.map((category) => ({
+    category,
+    tariff: tariffs.find((entry) => entry.tipo.trim().toLowerCase() === tipoForCategory(category)),
+  }));
+
+  return (
+    <Card className="max-w-full overflow-hidden border-brand-blue/15 p-4 shadow-md">
+      <div className="mb-4">
+        <h2 className="text-xl font-bold">Tarifas por categoría</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Modifica los montos vigentes. Los cambios se aplicarán a los próximos pagos.
+        </p>
+      </div>
+      {loading ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">Cargando tarifas...</p>
+      ) : loadError ? (
+        <div className="space-y-3">
+          <p className="text-sm text-destructive">{loadError}</p>
+          <Button variant="outline" onClick={() => setReloadKey((key) => key + 1)}>
+            Reintentar
+          </Button>
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          {tariffRows.map(({ category, tariff }) => {
+            const draft = priceDrafts[category] ?? "";
+            const parsedPrice = Number(draft);
+            const changed = Boolean(draft.trim()) && (!tariff || parsedPrice !== tariff.precio);
+            return (
+              <section key={category} className="space-y-3 rounded-md border p-4">
+                <div>
+                  <h3 className="font-semibold">{CATEGORY_TARIFF_LABELS[category]}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {tariff ? `Tipo: ${tariff.tipo}` : "Aún no configurada"}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <label className="flex-1 space-y-1 text-sm">
+                    <span className="font-medium">Tarifa (Bs)</span>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max="99999999.99"
+                      step="0.01"
+                      value={draft}
+                      onChange={(event) =>
+                        setPriceDrafts((current) => ({
+                          ...current,
+                          [category]: event.target.value,
+                        }))
+                      }
+                      aria-label={`Tarifa en bolivianos para ${CATEGORY_TARIFF_LABELS[category]}`}
+                      disabled={savingCategory !== null}
+                    />
+                  </label>
+                  <Button
+                    className="bg-brand-orange text-brand-ink hover:bg-brand-orange/90"
+                    onClick={() => saveTariff(category)}
+                    disabled={
+                      !changed ||
+                      !Number.isFinite(parsedPrice) ||
+                      parsedPrice < 0 ||
+                      savingCategory !== null
+                    }
+                  >
+                    {savingCategory === category ? "Guardando..." : "Guardar"}
+                  </Button>
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
     </Card>
   );
 }
@@ -1181,31 +1938,44 @@ type TxRow = {
 type TransactionProfile = {
   id: string;
   role: Profile["role"];
+  status: Profile["status"];
   first_name: string | null;
   paternal_surname: string | null;
   maternal_surname: string | null;
   category: Profile["category"];
   driver_code: string | null;
+  transport_line: string | null;
 };
 
-type ReportPeriod = "week" | "month" | "year";
+type ReportPeriod = "day" | "week" | "month" | "year";
 type ReportBreakdown = "none" | "passenger" | "category" | "driver";
+type FareLine = { category: string; kind: string; tickets: number; amount: number };
+type PassengerStatusFilter = "active" | "suspended" | "all";
+type GraphEntity = "passenger" | "driver";
+type GraphStyle = "bar" | "pie";
 
 type TransactionSummary = {
   periodKey: string;
   period: string;
   dimensionKey: string;
   dimension: string;
+  transactions: number;
   payments: number;
-  tickets: number;
+  companionPayments: number;
   amount: number;
 };
 
 function TransactionsPanel() {
   const { nombre } = useTarifas();
+  const [chartOpen, setChartOpen] = useState(false);
+  const [graphEntity, setGraphEntity] = useState<GraphEntity>("passenger");
+  const [graphStatusFilter, setGraphStatusFilter] = useState<PassengerStatusFilter>("active");
+  const [graphStyle, setGraphStyle] = useState<GraphStyle>("bar");
+  const [showDriverLines, setShowDriverLines] = useState(true);
   const [rows, setRows] = useState<TxRow[]>([]);
   const [profiles, setProfiles] = useState<Record<string, TransactionProfile>>({});
   const [dimensionProfiles, setDimensionProfiles] = useState<TransactionProfile[]>([]);
+  const [dimensionProfilesLoading, setDimensionProfilesLoading] = useState(true);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [period, setPeriod] = useState<ReportPeriod>("week");
@@ -1268,7 +2038,7 @@ function TransactionsPanel() {
           const { data, error } = await supabase
             .from("profiles")
             .select(
-              "id, role, first_name, paternal_surname, maternal_surname, category, driver_code",
+              "id, role, status, first_name, paternal_surname, maternal_surname, category, driver_code, transport_line",
             )
             .in("id", ids.slice(index, index + 100));
           if (error) throw new Error(error.message);
@@ -1299,16 +2069,39 @@ function TransactionsPanel() {
   useEffect(() => {
     let active = true;
     async function loadDimensionProfiles() {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, role, first_name, paternal_surname, maternal_surname, category, driver_code")
-        .in("role", ["driver", "passenger"])
-        .order("first_name");
-      if (error) {
-        if (active) toast.error(`No se pudieron cargar pasajeros y choferes: ${error.message}`);
-        return;
+      setDimensionProfilesLoading(true);
+      try {
+        const allProfiles: TransactionProfile[] = [];
+        const pageSize = 1000;
+        let offset = 0;
+        while (active) {
+          const { data, error } = await supabase
+            .from("profiles")
+            .select(
+              "id, role, status, first_name, paternal_surname, maternal_surname, category, driver_code, transport_line",
+            )
+            .in("role", ["driver", "passenger"])
+            .order("first_name")
+            .order("id", { ascending: true })
+            .range(offset, offset + pageSize - 1);
+          if (error) throw new Error(error.message);
+          const page = (data as TransactionProfile[]) ?? [];
+          allProfiles.push(...page);
+          if (page.length < pageSize) break;
+          offset += pageSize;
+        }
+        if (active) setDimensionProfiles(allProfiles);
+      } catch (error) {
+        if (active) {
+          toast.error(
+            error instanceof Error
+              ? `No se pudieron cargar pasajeros y choferes: ${error.message}`
+              : "No se pudieron cargar pasajeros y choferes",
+          );
+        }
+      } finally {
+        if (active) setDimensionProfilesLoading(false);
       }
-      if (active) setDimensionProfiles((data as TransactionProfile[]) ?? []);
     }
 
     void loadDimensionProfiles();
@@ -1330,8 +2123,13 @@ function TransactionsPanel() {
       if (selectedId !== selectedDimensionId) return false;
     }
     if (breakdown === "category") {
-      const category = profiles[transaction.passenger_id]?.category;
-      if (!category || !selectedCategories.includes(category)) return false;
+      if (
+        !getFareLines(transaction).some((line) =>
+          selectedCategories.some((category) => category === line.category),
+        )
+      ) {
+        return false;
+      }
     }
     return true;
   });
@@ -1348,6 +2146,10 @@ function TransactionsPanel() {
         key: `${year}-${String(month + 1).padStart(2, "0")}`,
         label: date.toLocaleDateString("es-BO", { month: "long", year: "numeric" }),
       };
+    }
+    if (period === "day") {
+      const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      return { key: dateKey, label: date.toLocaleDateString("es-BO") };
     }
     const monday = new Date(year, month, date.getDate());
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
@@ -1368,13 +2170,6 @@ function TransactionsPanel() {
         label: getDimensionName(transaction.passenger_id, transaction.passenger_id),
       };
     }
-    if (breakdown === "category") {
-      const category = profiles[transaction.passenger_id]?.category;
-      return {
-        key: category ?? "unknown",
-        label: category ? nombre(category) : "Sin tipo registrado",
-      };
-    }
     if (breakdown === "driver") {
       return {
         key: transaction.driver_id,
@@ -1384,24 +2179,96 @@ function TransactionsPanel() {
     return { key: "all", label: "Todos" };
   }
 
-  const summaryRows = (() => {
+  function getFareLines(transaction: TxRow): FareLine[] {
+    const lines: FareLine[] = [];
+    if (Array.isArray(transaction.fare_breakdown)) {
+      for (const item of transaction.fare_breakdown) {
+        if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+        const { category, kind, tickets, amount } = item;
+        if (typeof category !== "string" || typeof kind !== "string") continue;
+        lines.push({
+          category,
+          kind,
+          tickets: typeof tickets === "number" ? tickets : 1,
+          amount: typeof amount === "number" ? amount : 0,
+        });
+      }
+    }
+    return lines.length > 0
+      ? lines
+      : [
+          {
+            category: transaction.category,
+            kind: "titular",
+            tickets: Number(transaction.tickets),
+            amount: Number(transaction.amount),
+          },
+        ];
+  }
+
+  function buildSummary(transactions: TxRow[], mode: ReportBreakdown): TransactionSummary[] {
     const groups = new Map<string, TransactionSummary>();
-    for (const transaction of filteredRows) {
+    for (const transaction of transactions) {
       const bucket = getPeriod(transaction.created_at);
-      const dimension = getDimension(transaction);
+      const fareLines = getFareLines(transaction);
+      if (mode === "category") {
+        const categories = new Map<string, FareLine>();
+        for (const line of fareLines) {
+          const category = line.category;
+          if (!selectedCategories.some((selected) => selected === category)) continue;
+          const existing = categories.get(category) ?? {
+            category,
+            kind: "titular",
+            tickets: 0,
+            amount: 0,
+          };
+          existing.tickets += line.tickets;
+          existing.amount += line.amount;
+          if (line.kind === "acompanante") existing.kind = "acompanante";
+          categories.set(category, existing);
+        }
+        for (const [category, line] of categories) {
+          const key = `${bucket.key}|${category}`;
+          const summary = groups.get(key) ?? {
+            periodKey: bucket.key,
+            period: bucket.label,
+            dimensionKey: category,
+            dimension: nombre(category),
+            transactions: 0,
+            payments: 0,
+            companionPayments: 0,
+            amount: 0,
+          };
+          summary.transactions += 1;
+          summary.payments += line.tickets;
+          summary.companionPayments += fareLines
+            .filter((fareLine) => fareLine.category === category && fareLine.kind === "acompanante")
+            .reduce((count, fareLine) => count + fareLine.tickets, 0);
+          summary.amount += line.amount;
+          groups.set(key, summary);
+        }
+        continue;
+      }
+
+      const dimension =
+        mode === "none" ? { key: "all", label: "Todos" } : getDimension(transaction);
       const key = `${bucket.key}|${dimension.key}`;
       const summary = groups.get(key) ?? {
         periodKey: bucket.key,
         period: bucket.label,
         dimensionKey: dimension.key,
         dimension: dimension.label,
+        transactions: 0,
         payments: 0,
-        tickets: 0,
+        companionPayments: 0,
         amount: 0,
       };
-      summary.payments += 1;
-      summary.tickets += Number(transaction.tickets);
-      summary.amount += Number(transaction.amount);
+      summary.transactions += 1;
+      for (const line of fareLines) {
+        summary.payments += line.tickets;
+        if (line.kind === "acompanante") summary.companionPayments += line.tickets;
+        summary.amount += line.amount;
+      }
       groups.set(key, summary);
     }
     return Array.from(groups.values()).sort(
@@ -1409,7 +2276,10 @@ function TransactionsPanel() {
         first.periodKey.localeCompare(second.periodKey) ||
         first.dimension.localeCompare(second.dimension, "es-BO"),
     );
-  })();
+  }
+
+  const generalSummaryRows = buildSummary(rows, "none");
+  const summaryRows = buildSummary(filteredRows, breakdown);
 
   function exportExcel() {
     const sheet = XLSX.utils.json_to_sheet(
@@ -1438,14 +2308,116 @@ function TransactionsPanel() {
       summaryRows.map((summary) => ({
         Periodo: summary.period,
         [breakdownLabel]: summary.dimension,
+        Transacciones: summary.transactions,
         Pagos: summary.payments,
-        Pasajes: summary.tickets,
+        "Pagos acompañantes": summary.companionPayments,
         "Monto (Bs)": Number(summary.amount.toFixed(2)),
       })),
     );
     XLSX.utils.book_append_sheet(wb, summarySheet, "Resumen");
     XLSX.writeFile(wb, `transacciones-${startDate || "inicio"}-${endDate || "actualidad"}.xlsx`);
     toast.success("Reporte exportado");
+  }
+
+  function exportSummaryExcel(
+    rowsToExport: TransactionSummary[],
+    title: string,
+    includeDimension: boolean,
+  ) {
+    const sheet = XLSX.utils.json_to_sheet(
+      rowsToExport.map((summary) => ({
+        Periodo: summary.period,
+        ...(includeDimension ? { [breakdownLabel]: summary.dimension } : {}),
+        Transacciones: summary.transactions,
+        Pagos: summary.payments,
+        "Pagos acompañantes": summary.companionPayments,
+        "Monto (Bs)": Number(summary.amount.toFixed(2)),
+      })),
+    );
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Resumen");
+    XLSX.writeFile(
+      workbook,
+      `${title.toLocaleLowerCase("es").replace(/\s+/g, "-")}-${startDate || "inicio"}-${endDate || "actualidad"}.xlsx`,
+    );
+    toast.success(`${title} exportado a Excel`);
+  }
+
+  function exportSummaryPdf(
+    rowsToExport: TransactionSummary[],
+    title: string,
+    includeDimension: boolean,
+  ) {
+    try {
+      const document = new jsPDF({ orientation: "landscape" });
+      const pageHeight = document.internal.pageSize.getHeight();
+      const pageWidth = document.internal.pageSize.getWidth();
+      const columns = [
+        { title: "Periodo", getValue: (summary: TransactionSummary) => summary.period },
+        ...(includeDimension
+          ? [
+              {
+                title: breakdownLabel,
+                getValue: (summary: TransactionSummary) => summary.dimension,
+              },
+            ]
+          : []),
+        {
+          title: "Transacciones",
+          getValue: (summary: TransactionSummary) => String(summary.transactions),
+        },
+        { title: "Pagos", getValue: (summary: TransactionSummary) => String(summary.payments) },
+        {
+          title: "Pagos acompañantes",
+          getValue: (summary: TransactionSummary) => String(summary.companionPayments),
+        },
+        {
+          title: "Monto (Bs)",
+          getValue: (summary: TransactionSummary) => summary.amount.toFixed(2),
+        },
+      ];
+      const positions = columns.map((_, index) => 14 + (pageWidth - 28) * (index / columns.length));
+      let y = 18;
+      document.setFont("helvetica", "bold");
+      document.setFontSize(15);
+      document.text(title, 14, y);
+      document.setFont("helvetica", "normal");
+      document.setFontSize(9);
+      y += 8;
+      document.text(
+        `Periodo: ${startDate || "Sin fecha de inicio"} - ${endDate || "Sin fecha fin"} · Vista ${periodLabel.toLowerCase()}`,
+        14,
+        y,
+      );
+      y += 10;
+
+      const writeHeader = () => {
+        document.setFont("helvetica", "bold");
+        document.setFontSize(8);
+        columns.forEach((column, index) => document.text(column.title, positions[index], y));
+        y += 6;
+        document.setFont("helvetica", "normal");
+      };
+      writeHeader();
+      for (const summary of rowsToExport) {
+        if (y > pageHeight - 14) {
+          document.addPage();
+          y = 18;
+          writeHeader();
+        }
+        document.setFontSize(8);
+        columns.forEach((column, index) =>
+          document.text(column.getValue(summary).slice(0, 30), positions[index], y),
+        );
+        y += 6;
+      }
+      document.save(
+        `${title.toLocaleLowerCase("es").replace(/\s+/g, "-")}-${startDate || "inicio"}-${endDate || "actualidad"}.pdf`,
+      );
+      toast.success(`${title} exportado a PDF`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `No se pudo exportar ${title}`);
+    }
   }
 
   function getDimensionName(id: string, fallback: string) {
@@ -1463,13 +2435,10 @@ function TransactionsPanel() {
 
   function getCompanionFareTypes(transaction: TxRow) {
     const counts = new Map<string, number>();
-    if (!Array.isArray(transaction.fare_breakdown)) return "—";
-    for (const item of transaction.fare_breakdown) {
-      if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
-      const { category, kind, tickets } = item;
-      if (kind !== "acompanante" || typeof category !== "string") continue;
-      const count = typeof tickets === "number" ? tickets : 1;
-      counts.set(category, (counts.get(category) ?? 0) + count);
+    for (const line of getFareLines(transaction)) {
+      if (line.kind !== "acompanante") continue;
+      const category = line.category;
+      counts.set(category, (counts.get(category) ?? 0) + line.tickets);
     }
     return (
       Array.from(counts, ([category, count]) =>
@@ -1483,6 +2452,14 @@ function TransactionsPanel() {
     (sum, transaction) => sum + Number(transaction.tickets),
     0,
   );
+  const totalCompanionPayments = filteredRows.reduce(
+    (sum, transaction) =>
+      sum +
+      getFareLines(transaction)
+        .filter((line) => line.kind === "acompanante")
+        .reduce((count, line) => count + line.tickets, 0),
+    0,
+  );
   const breakdownLabel =
     breakdown === "passenger"
       ? "Pasajero"
@@ -1491,7 +2468,7 @@ function TransactionsPanel() {
         : breakdown === "driver"
           ? "Chofer"
           : "Agrupación";
-  const periodLabel = { week: "Semanal", month: "Mensual", year: "Anual" }[period];
+  const periodLabel = { day: "Diario", week: "Semanal", month: "Mensual", year: "Anual" }[period];
   const selectedDimension = dimensionProfiles.find(
     (candidate) => candidate.id === selectedDimensionId,
   );
@@ -1504,6 +2481,229 @@ function TransactionsPanel() {
   );
   const dimensionLabel =
     breakdown === "passenger" ? "Pasajero" : breakdown === "driver" ? "Chofer" : "Todos";
+  const graphStatusLabels: Record<PassengerStatusFilter, string> = {
+    active: "Activos",
+    suspended: "Suspendidos",
+    all: "Activos y suspendidos",
+  };
+  const chartColors = [
+    "#2563eb",
+    "#16a34a",
+    "#f97316",
+    "#9333ea",
+    "#0891b2",
+    "#db2777",
+    "#ca8a04",
+    "#0f766e",
+    "#c026d3",
+    "#4f46e5",
+  ];
+  const colorForStatus = (color: string, status: "active" | "suspended") => {
+    if (status === "active") return color;
+    const channels = [1, 3, 5].map((start) => parseInt(color.slice(start, start + 2), 16));
+    return `#${channels
+      .map((channel) =>
+        Math.round(channel * 0.65)
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")}`;
+  };
+  const graphData = (() => {
+    const groups = new Map<
+      string,
+      { label: string; activeCount: number; suspendedCount: number }
+    >();
+    for (const profile of dimensionProfiles) {
+      if (profile.role !== graphEntity) continue;
+      if (graphStatusFilter !== "all" && profile.status !== graphStatusFilter) continue;
+      if (profile.status !== "active" && profile.status !== "suspended") continue;
+
+      let key: string;
+      let label: string;
+      if (graphEntity === "passenger") {
+        key = profile.category ?? "sin_categoria";
+        label = profile.category ? nombre(profile.category) : "Sin categoría";
+      } else if (showDriverLines) {
+        label = profile.transport_line?.trim() || "Sin línea registrada";
+        key = label.toLocaleLowerCase("es");
+      } else {
+        label = "Choferes";
+        key = "choferes";
+      }
+
+      const current = groups.get(key) ?? { label, activeCount: 0, suspendedCount: 0 };
+      if (profile.status === "active") current.activeCount += 1;
+      else current.suspendedCount += 1;
+      groups.set(key, current);
+    }
+    return Array.from(groups, ([key, group], index) => ({
+      key,
+      label: group.label,
+      activeCount: group.activeCount,
+      suspendedCount: group.suspendedCount,
+      count: group.activeCount + group.suspendedCount,
+      color: chartColors[index % chartColors.length],
+    })).sort(
+      (first, second) =>
+        second.count - first.count || first.label.localeCompare(second.label, "es"),
+    );
+  })();
+  const graphTotal = graphData.reduce((total, entry) => total + entry.count, 0);
+  const graphActiveTotal = graphData.reduce((total, entry) => total + entry.activeCount, 0);
+  const graphSuspendedTotal = graphData.reduce((total, entry) => total + entry.suspendedCount, 0);
+  const graphPieData =
+    graphStatusFilter === "all"
+      ? graphData.flatMap((entry) =>
+          [
+            {
+              key: `${entry.key}-active`,
+              label: `${entry.label} · Activos`,
+              count: entry.activeCount,
+              color: colorForStatus(entry.color, "active"),
+            },
+            {
+              key: `${entry.key}-suspended`,
+              label: `${entry.label} · Suspendidos`,
+              count: entry.suspendedCount,
+              color: colorForStatus(entry.color, "suspended"),
+            },
+          ].filter((segment) => segment.count > 0),
+        )
+      : graphData.map((entry) => ({ ...entry, count: entry.count }));
+  const maxGraphCount = Math.max(
+    1,
+    ...graphData.flatMap((entry) =>
+      graphStatusFilter === "all" ? [entry.activeCount, entry.suspendedCount] : [entry.count],
+    ),
+  );
+  const graphSvgWidth = graphStyle === "pie" ? 760 : Math.max(720, graphData.length * 120 + 40);
+  const graphSvgHeight =
+    graphStyle === "pie"
+      ? Math.max(360, 70 + graphPieData.length * 26)
+      : graphStatusFilter === "all"
+        ? 390
+        : 360;
+  const chartTitle =
+    graphEntity === "passenger"
+      ? "Pasajeros por categoría"
+      : showDriverLines
+        ? "Choferes por línea"
+        : "Choferes registrados";
+
+  function renderSummaryTable(
+    title: string,
+    summaries: TransactionSummary[],
+    includeDimension: boolean,
+    fileTag: string,
+  ) {
+    return (
+      <section className="mb-5">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-semibold">{title}</h3>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+              onClick={() => exportSummaryExcel(summaries, fileTag, includeDimension)}
+              disabled={loading || summaries.length === 0 || Boolean(dateError)}
+            >
+              <Download className="mr-1 h-4 w-4" /> Excel del resumen
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+              onClick={() => exportSummaryPdf(summaries, fileTag, includeDimension)}
+              disabled={loading || summaries.length === 0 || Boolean(dateError)}
+            >
+              <FileText className="mr-1 h-4 w-4" /> PDF del resumen
+            </Button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px] text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                <th className="py-2 pr-3">Periodo</th>
+                {includeDimension && <th className="py-2 pr-3">{breakdownLabel}</th>}
+                <th className="py-2 pr-3">Transacciones</th>
+                <th className="py-2 pr-3">Pagos</th>
+                <th className="py-2 pr-3">Pagos acompañantes</th>
+                <th className="py-2 pr-3">Monto (Bs)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {summaries.map((summary, index) => (
+                <tr key={`${summary.period}-${summary.dimension}-${index}`}>
+                  <td className="whitespace-nowrap py-2 pr-3">{summary.period}</td>
+                  {includeDimension && <td className="py-2 pr-3">{summary.dimension}</td>}
+                  <td className="py-2 pr-3">{summary.transactions}</td>
+                  <td className="py-2 pr-3">{summary.payments}</td>
+                  <td className="py-2 pr-3">{summary.companionPayments}</td>
+                  <td className="py-2 pr-3">Bs {summary.amount.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!loading && summaries.length === 0 && (
+            <p className="p-3 text-sm text-muted-foreground">
+              Sin datos para el periodo seleccionado.
+            </p>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  async function downloadGraph() {
+    const svg = document.getElementById("admin-users-chart");
+    if (!(svg instanceof SVGSVGElement)) {
+      toast.error("No se encontró la gráfica para descargar");
+      return;
+    }
+
+    const imageUrl = URL.createObjectURL(
+      new Blob([new XMLSerializer().serializeToString(svg)], {
+        type: "image/svg+xml;charset=utf-8",
+      }),
+    );
+    try {
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("No se pudo preparar la imagen de la gráfica"));
+        image.src = imageUrl;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = svg.viewBox.baseVal.width;
+      canvas.height = svg.viewBox.baseVal.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("No se pudo crear la imagen para descargar");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!png) throw new Error("No se pudo generar el archivo PNG");
+
+      const downloadUrl = URL.createObjectURL(png);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `grafica-${graphEntity}-${graphStyle}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+      toast.success("Gráfica descargada");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo descargar la gráfica");
+    } finally {
+      URL.revokeObjectURL(imageUrl);
+    }
+  }
 
   function generatePdf() {
     try {
@@ -1534,7 +2734,7 @@ function TransactionsPanel() {
         `${dimensionLabel}: ${selectedDimension ? profileName(selectedDimension, selectedDimension.id) : "General"} · Desglose: ${breakdownLabel}`,
       );
       writeText(
-        `Pagos: ${filteredRows.length} · Pasajes: ${totalTickets} · Total: Bs ${total.toFixed(2)}`,
+        `Transacciones: ${filteredRows.length} · Pagos: ${totalTickets} · Pagos acompañantes: ${totalCompanionPayments} · Total: Bs ${total.toFixed(2)}`,
       );
       y += 4;
 
@@ -1543,7 +2743,7 @@ function TransactionsPanel() {
       document.setFont("helvetica", "normal");
       for (const summary of summaryRows) {
         writeText(
-          `${summary.period} | ${breakdownLabel}: ${summary.dimension} | Pagos: ${summary.payments} | Pasajes: ${summary.tickets} | Bs ${summary.amount.toFixed(2)}`,
+          `${summary.period} | ${breakdownLabel}: ${summary.dimension} | Transacciones: ${summary.transactions} | Pagos: ${summary.payments} | Pagos acompañantes: ${summary.companionPayments} | Bs ${summary.amount.toFixed(2)}`,
         );
       }
 
@@ -1611,6 +2811,14 @@ function TransactionsPanel() {
             size="sm"
             variant="outline"
             className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+            onClick={() => setChartOpen(true)}
+          >
+            <BarChart3 className="mr-1 h-4 w-4" /> Gráficas
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
             onClick={exportExcel}
             disabled={loading || filteredRows.length === 0 || Boolean(dateError)}
           >
@@ -1652,6 +2860,7 @@ function TransactionsPanel() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="day">Diario</SelectItem>
               <SelectItem value="week">Semanal</SelectItem>
               <SelectItem value="month">Mensual</SelectItem>
               <SelectItem value="year">Anual</SelectItem>
@@ -1777,40 +2986,21 @@ function TransactionsPanel() {
       <p className="text-sm text-muted-foreground mb-3">
         {loading
           ? "Cargando transacciones..."
-          : `${filteredRows.length} pagos · ${totalTickets} pasajes · Total Bs ${total.toFixed(2)}`}
+          : `${filteredRows.length} transacciones · ${totalTickets} pagos · ${totalCompanionPayments} pagos acompañantes · Total Bs ${total.toFixed(2)}`}
       </p>
-      <div className="mb-5">
-        <h3 className="font-semibold mb-2">Resumen {periodLabel.toLowerCase()}</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[560px]">
-            <thead>
-              <tr className="text-left text-xs uppercase text-muted-foreground border-b">
-                <th className="py-2 pr-3">Periodo</th>
-                <th className="py-2 pr-3">{breakdownLabel}</th>
-                <th className="py-2 pr-3">Pagos</th>
-                <th className="py-2 pr-3">Pasajes</th>
-                <th className="py-2 pr-3">Monto (Bs)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {summaryRows.map((summary, index) => (
-                <tr key={`${summary.period}-${summary.dimension}-${index}`}>
-                  <td className="py-2 pr-3 whitespace-nowrap">{summary.period}</td>
-                  <td className="py-2 pr-3">{summary.dimension}</td>
-                  <td className="py-2 pr-3">{summary.payments}</td>
-                  <td className="py-2 pr-3">{summary.tickets}</td>
-                  <td className="py-2 pr-3">Bs {summary.amount.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!loading && summaryRows.length === 0 && (
-            <p className="text-sm text-muted-foreground p-3">
-              Sin datos para el periodo seleccionado.
-            </p>
-          )}
-        </div>
-      </div>
+      {renderSummaryTable(
+        `Resumen general ${periodLabel.toLowerCase()}`,
+        generalSummaryRows,
+        false,
+        "Resumen general",
+      )}
+      {breakdown !== "none" &&
+        renderSummaryTable(
+          `Resumen por ${breakdownLabel.toLocaleLowerCase("es")} ${periodLabel.toLowerCase()}`,
+          summaryRows,
+          true,
+          `Resumen ${breakdownLabel}`,
+        )}
       <div className="overflow-x-auto">
         <h3 className="font-semibold mb-2">Detalle de transacciones</h3>
         <table className="w-full text-sm min-w-[800px]">
@@ -1866,6 +3056,270 @@ function TransactionsPanel() {
           <p className="text-sm text-muted-foreground p-4">Sin transacciones registradas.</p>
         )}
       </div>
+      <Dialog open={chartOpen} onOpenChange={setChartOpen}>
+        <DialogContent className="max-h-[90vh] w-[95vw] max-w-3xl overflow-y-auto border-brand-blue/20">
+          <DialogHeader>
+            <DialogTitle>{chartTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Mostrar</span>
+              <Select
+                value={graphEntity}
+                onValueChange={(value) => setGraphEntity(value as GraphEntity)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="passenger">Pasajeros</SelectItem>
+                  <SelectItem value="driver">Choferes</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">
+                Estado de {graphEntity === "passenger" ? "pasajeros" : "choferes"}
+              </span>
+              <Select
+                value={graphStatusFilter}
+                onValueChange={(value) => setGraphStatusFilter(value as PassengerStatusFilter)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Activos</SelectItem>
+                  <SelectItem value="suspended">Suspendidos</SelectItem>
+                  <SelectItem value="all">Activos y suspendidos</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Tipo de gráfica</span>
+              <Select
+                value={graphStyle}
+                onValueChange={(value) => setGraphStyle(value as GraphStyle)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bar">Barras</SelectItem>
+                  <SelectItem value="pie">Torta</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            {graphEntity === "driver" && (
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={showDriverLines}
+                  onCheckedChange={(checked) => setShowDriverLines(checked === true)}
+                />
+                <span className="font-medium">Mostrar líneas de transporte</span>
+              </label>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">
+              {graphStatusFilter === "all" ? (
+                <>
+                  Activos: {graphActiveTotal} · Suspendidos: {graphSuspendedTotal} · Total:{" "}
+                  {graphTotal} {graphEntity === "passenger" ? "pasajeros" : "choferes"}
+                </>
+              ) : (
+                <>
+                  {graphStatusLabels[graphStatusFilter]}: {graphTotal}{" "}
+                  {graphEntity === "passenger" ? "pasajeros" : "choferes"}
+                </>
+              )}
+              {graphEntity === "driver" && showDriverLines ? ` · ${graphData.length} líneas` : ""}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+              onClick={downloadGraph}
+              disabled={dimensionProfilesLoading || graphData.length === 0}
+            >
+              <Download className="mr-1 h-4 w-4" /> Descargar PNG
+            </Button>
+          </div>
+          {dimensionProfilesLoading ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">
+              Cargando {graphEntity === "passenger" ? "pasajeros" : "choferes"}...
+            </p>
+          ) : graphData.length > 0 ? (
+            <div className="overflow-x-auto">
+              <svg
+                id="admin-users-chart"
+                xmlns="http://www.w3.org/2000/svg"
+                width={graphSvgWidth}
+                height={graphSvgHeight}
+                viewBox={`0 0 ${graphSvgWidth} ${graphSvgHeight}`}
+                role="img"
+                aria-label={chartTitle}
+                className="block bg-white"
+              >
+                <rect width={graphSvgWidth} height={graphSvgHeight} fill="#ffffff" />
+                {graphStyle === "bar" ? (
+                  <>
+                    <line x1="20" y1="270" x2={graphSvgWidth - 20} y2="270" stroke="#cbd5e1" />
+                    {graphData.map((entry, index) => {
+                      const slotWidth = graphSvgWidth / graphData.length;
+                      const hasStatusSplit = graphStatusFilter === "all";
+                      const barWidth = Math.min(72, slotWidth * (hasStatusSplit ? 0.28 : 0.55));
+                      const centerX = slotWidth * index + slotWidth / 2;
+                      const series =
+                        graphStatusFilter === "all"
+                          ? [
+                              {
+                                label: "Activos",
+                                count: entry.activeCount,
+                                color: colorForStatus(entry.color, "active"),
+                              },
+                              {
+                                label: "Suspendidos",
+                                count: entry.suspendedCount,
+                                color: colorForStatus(entry.color, "suspended"),
+                              },
+                            ]
+                          : [
+                              {
+                                label: graphStatusLabels[graphStatusFilter],
+                                count: entry.count,
+                                color: entry.color,
+                              },
+                            ];
+                      return (
+                        <g key={entry.key}>
+                          {series.map((item, seriesIndex) => {
+                            const x = hasStatusSplit
+                              ? centerX - barWidth - 2 + seriesIndex * (barWidth + 4)
+                              : centerX - barWidth / 2;
+                            const barHeight = (item.count / maxGraphCount) * 210;
+                            const y = 260 - barHeight;
+                            return (
+                              <g key={`${entry.key}-${item.label}`}>
+                                <title>
+                                  {entry.label} · {item.label}: {item.count}
+                                </title>
+                                <rect
+                                  x={x}
+                                  y={y}
+                                  width={barWidth}
+                                  height={barHeight}
+                                  rx="5"
+                                  fill={item.color}
+                                />
+                                {item.count > 0 && (
+                                  <text
+                                    x={x + barWidth / 2}
+                                    y={y - 8}
+                                    textAnchor="middle"
+                                    fontSize="13"
+                                    fill="#111827"
+                                  >
+                                    {item.count}
+                                  </text>
+                                )}
+                              </g>
+                            );
+                          })}
+                          <text
+                            x={centerX}
+                            y="294"
+                            textAnchor="middle"
+                            fontSize="11"
+                            fill="#111827"
+                          >
+                            {entry.label.length > 18 ? `${entry.label.slice(0, 17)}…` : entry.label}
+                          </text>
+                        </g>
+                      );
+                    })}
+                    {graphStatusFilter === "all" && (
+                      <>
+                        <rect
+                          x="20"
+                          y="338"
+                          width="12"
+                          height="12"
+                          rx="2"
+                          fill={colorForStatus(graphData[0]?.color ?? chartColors[0], "active")}
+                        />
+                        <text x="38" y="348" fontSize="12" fill="#111827">
+                          Activos
+                        </text>
+                        <rect
+                          x="110"
+                          y="338"
+                          width="12"
+                          height="12"
+                          rx="2"
+                          fill={colorForStatus(graphData[0]?.color ?? chartColors[0], "suspended")}
+                        />
+                        <text x="128" y="348" fontSize="12" fill="#111827">
+                          Suspendidos
+                        </text>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {(() => {
+                      let startAngle = -Math.PI / 2;
+                      return graphPieData.map((entry) => {
+                        const sweep = (entry.count / graphTotal) * Math.PI * 2;
+                        const endAngle = startAngle + sweep;
+                        const startX = 180 + 132 * Math.cos(startAngle);
+                        const startY = 180 + 132 * Math.sin(startAngle);
+                        const endX = 180 + 132 * Math.cos(endAngle);
+                        const endY = 180 + 132 * Math.sin(endAngle);
+                        const largeArc = sweep > Math.PI ? 1 : 0;
+                        const path = `M 180 180 L ${startX} ${startY} A 132 132 0 ${largeArc} 1 ${endX} ${endY} Z`;
+                        startAngle = endAngle;
+                        return (
+                          <g key={entry.key}>
+                            <title>
+                              {entry.label}: {entry.count}
+                            </title>
+                            {graphPieData.length === 1 ? (
+                              <circle cx="180" cy="180" r="132" fill={entry.color} />
+                            ) : (
+                              <path d={path} fill={entry.color} stroke="#ffffff" strokeWidth="2" />
+                            )}
+                          </g>
+                        );
+                      });
+                    })()}
+                    {graphPieData.map((entry, index) => (
+                      <g key={`legend-${entry.key}`}>
+                        <rect
+                          x="370"
+                          y={42 + index * 26}
+                          width="14"
+                          height="14"
+                          rx="2"
+                          fill={entry.color}
+                        />
+                        <text x="394" y={54 + index * 26} fontSize="12" fill="#111827">
+                          {entry.label} ({entry.count})
+                        </text>
+                      </g>
+                    ))}
+                  </>
+                )}
+              </svg>
+            </div>
+          ) : (
+            <p className="py-12 text-center text-sm text-muted-foreground">
+              No hay {graphEntity === "passenger" ? "pasajeros" : "choferes"}{" "}
+              {graphStatusLabels[graphStatusFilter].toLowerCase()}.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
