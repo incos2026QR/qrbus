@@ -40,7 +40,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { cleanAccount, formatAccount } from "@/lib/bank";
 import { isValidBankAccount } from "@/lib/registration-validation";
-import * as XLSX from "xlsx";
+import type * as XLSXStyle from "xlsx-js-style";
 import { jsPDF } from "jspdf";
 import { createSupervisor, updateSupervisor, updateSupervisorPassword } from "@/lib/auth.functions";
 import { STATUS_LABELS, ALL_CATEGORIES, type Category } from "@/lib/categories";
@@ -97,6 +97,17 @@ type DriverRatingStats = {
   ratedDrivers: number;
   buckets: { rating: number; count: number; percentage: number }[];
 };
+
+type DriverRatingRankingEntry = {
+  id: string;
+  name: string;
+  driverCode: string;
+  transportLine: string;
+  averageRating: number;
+  ratingCount: number;
+};
+
+type DriverRatingRankingLimit = "10" | "20" | "all";
 
 type IndividualDriverRatingStats = {
   totalRatings: number;
@@ -337,6 +348,9 @@ function UserTable({
   const [driverRatingStatsLoading, setDriverRatingStatsLoading] = useState(false);
   const [driverRatingStatsError, setDriverRatingStatsError] = useState("");
   const [driverRatingStats, setDriverRatingStats] = useState<DriverRatingStats | null>(null);
+  const [driverRatingRanking, setDriverRatingRanking] = useState<DriverRatingRankingEntry[]>([]);
+  const [driverRatingRankingLimit, setDriverRatingRankingLimit] =
+    useState<DriverRatingRankingLimit>("10");
   const [selectedRatingDriver, setSelectedRatingDriver] = useState<Profile | null>(null);
   const [individualRatingStatsLoading, setIndividualRatingStatsLoading] = useState(false);
   const [individualRatingStatsError, setIndividualRatingStatsError] = useState("");
@@ -418,9 +432,46 @@ function UserTable({
       const { data, error } = await supabase.from("driver_rating_report_summary").select("*");
       if (error) throw new Error(error.message);
 
+      const summaryRows = data ?? [];
+      const driverIds = summaryRows.flatMap((row) => (row.driver_id ? [row.driver_id] : []));
+      const { data: drivers, error: driversError } = driverIds.length
+        ? await supabase
+            .from("drivers")
+            .select("id, first_name, paternal_surname, driver_code, transport_line")
+            .in("id", driverIds)
+        : { data: [], error: null };
+      if (driversError) throw new Error(driversError.message);
+
+      const driverById = new Map((drivers ?? []).map((driver) => [driver.id, driver]));
+      const ranking = summaryRows
+        .flatMap((row) => {
+          if (!row.driver_id || !Number(row.rating_count) || row.average_rating === null) return [];
+          const driver = driverById.get(row.driver_id);
+          const fullName = [driver?.first_name, driver?.paternal_surname]
+            .filter((part): part is string => Boolean(part?.trim()))
+            .join(" ");
+          return [
+            {
+              id: row.driver_id,
+              name: fullName || "Chofer",
+              driverCode: driver?.driver_code || "—",
+              transportLine: driver?.transport_line || "—",
+              averageRating: Number(row.average_rating),
+              ratingCount: Number(row.rating_count),
+            },
+          ];
+        })
+        .sort(
+          (a, b) =>
+            b.averageRating - a.averageRating ||
+            b.ratingCount - a.ratingCount ||
+            a.name.localeCompare(b.name, "es"),
+        );
+      setDriverRatingRanking(ranking);
+
       const buckets = DRIVER_RATING_BUCKETS.map(({ rating, field }) => ({
         rating,
-        count: (data ?? []).reduce((total, row) => total + Number(row[field] ?? 0), 0),
+        count: summaryRows.reduce((total, row) => total + Number(row[field] ?? 0), 0),
       }));
       const totalRatings = buckets.reduce((total, bucket) => total + bucket.count, 0);
       const ratingPoints = buckets.reduce(
@@ -430,7 +481,7 @@ function UserTable({
       setDriverRatingStats({
         totalRatings,
         averageRating: totalRatings ? ratingPoints / totalRatings : null,
-        ratedDrivers: (data ?? []).filter((row) => Number(row.rating_count ?? 0) > 0).length,
+        ratedDrivers: summaryRows.filter((row) => Number(row.rating_count ?? 0) > 0).length,
         buckets: buckets.map((bucket) => ({
           ...bucket,
           percentage: totalRatings ? (bucket.count / totalRatings) * 100 : 0,
@@ -443,6 +494,130 @@ function UserTable({
       toast.error(message);
     } finally {
       setDriverRatingStatsLoading(false);
+    }
+  }
+
+  const visibleDriverRatingRanking =
+    driverRatingRankingLimit === "all"
+      ? driverRatingRanking
+      : driverRatingRanking.slice(0, Number(driverRatingRankingLimit));
+
+  function getDriverRatingRankingLabel() {
+    return driverRatingRankingLimit === "all"
+      ? "todos"
+      : `top-${driverRatingRankingLimit}`;
+  }
+
+  async function exportDriverRatingRankingExcel() {
+    if (visibleDriverRatingRanking.length === 0) return;
+    try {
+      const XLSX = await import("xlsx-js-style");
+      const worksheet = XLSX.utils.json_to_sheet(
+        visibleDriverRatingRanking.map((driver, index) => ({
+          Puesto: index + 1,
+          Chofer: driver.name,
+          "Código de chofer": driver.driverCode,
+          Línea: driver.transportLine,
+          "Promedio de estrellas": Number(driver.averageRating.toFixed(2)),
+          Calificaciones: driver.ratingCount,
+        })),
+      );
+      styleReportWorksheet(XLSX, worksheet);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Ranking de choferes");
+      XLSX.writeFile(workbook, `ranking-choferes-${getDriverRatingRankingLabel()}.xlsx`);
+      toast.success("Ranking de choferes exportado a Excel");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo exportar el ranking");
+    }
+  }
+
+  function downloadDriverRatingRankingPdf() {
+    if (visibleDriverRatingRanking.length === 0) return;
+    try {
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 12;
+      const columns = [
+        { title: "Puesto", width: 18 },
+        { title: "Chofer", width: 66 },
+        { title: "Código", width: 32 },
+        { title: "Línea", width: 64 },
+        { title: "Promedio", width: 32 },
+        { title: "Calificaciones", width: 36 },
+      ];
+      const tableWidth = columns.reduce((total, column) => total + column.width, 0);
+      const left = Math.max(margin, (pageWidth - tableWidth) / 2);
+      let y = 0;
+
+      const drawHeader = (includeTitle: boolean) => {
+        if (includeTitle) {
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(16);
+          pdf.setTextColor(7, 71, 131);
+          pdf.text("QR Pago Justo - Ranking de choferes", margin, 16);
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(9);
+          pdf.setTextColor(71, 85, 105);
+          pdf.text(
+            `Reporte ${driverRatingRankingLimit === "all" ? "completo" : `Top ${driverRatingRankingLimit}`} · ${visibleDriverRatingRanking.length} choferes`,
+            margin,
+            22,
+          );
+          y = 29;
+        } else {
+          y = margin;
+        }
+
+        pdf.setFillColor(7, 71, 131);
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(8);
+        let x = left;
+        for (const column of columns) {
+          pdf.rect(x, y, column.width, 8, "F");
+          pdf.text(column.title, x + 2, y + 5.3);
+          x += column.width;
+        }
+        y += 8;
+        pdf.setTextColor(17, 24, 39);
+        pdf.setFont("helvetica", "normal");
+      };
+
+      drawHeader(true);
+      visibleDriverRatingRanking.forEach((driver, index) => {
+        const values = [
+          String(index + 1),
+          driver.name,
+          driver.driverCode,
+          driver.transportLine,
+          `${driver.averageRating.toFixed(2)} / 5`,
+          String(driver.ratingCount),
+        ];
+        const linesByCell = values.map((value, cellIndex) =>
+          pdf.splitTextToSize(value || "—", columns[cellIndex].width - 4),
+        );
+        const rowHeight = Math.max(8, ...linesByCell.map((lines) => lines.length * 4 + 3));
+        if (y + rowHeight > pageHeight - margin) {
+          pdf.addPage();
+          drawHeader(false);
+        }
+
+        let x = left;
+        columns.forEach((column, cellIndex) => {
+          pdf.setDrawColor(203, 213, 225);
+          pdf.rect(x, y, column.width, rowHeight);
+          pdf.text(linesByCell[cellIndex], x + 2, y + 5);
+          x += column.width;
+        });
+        y += rowHeight;
+      });
+
+      pdf.save(`ranking-choferes-${getDriverRatingRankingLabel()}.pdf`);
+      toast.success("Ranking de choferes descargado en PDF");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo generar el PDF");
     }
   }
 
@@ -497,9 +672,10 @@ function UserTable({
     }
   }
 
-  function exportDriverRatingStats() {
+  async function exportDriverRatingStats() {
     if (!driverRatingStats) return;
     try {
+      const XLSX = await import("xlsx-js-style");
       const summarySheet = XLSX.utils.json_to_sheet([
         {
           "Total de calificaciones": driverRatingStats.totalRatings,
@@ -516,6 +692,8 @@ function UserTable({
           Porcentaje: bucket.percentage / 100,
         })),
       );
+      styleReportWorksheet(XLSX, summarySheet);
+      styleReportWorksheet(XLSX, distributionSheet);
       for (let row = 2; row <= driverRatingStats.buckets.length + 1; row += 1) {
         const percentageCell = distributionSheet[`C${row}`];
         if (percentageCell) percentageCell.z = "0.00%";
@@ -883,6 +1061,87 @@ function UserTable({
                   </tbody>
                 </table>
               </div>
+              <section className="space-y-3 border-t pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">Ranking de choferes</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Ordenado por promedio de estrellas; los empates se ordenan por cantidad de
+                      calificaciones.
+                    </p>
+                  </div>
+                  <Select
+                    value={driverRatingRankingLimit}
+                    onValueChange={(value) =>
+                      setDriverRatingRankingLimit(value as DriverRatingRankingLimit)
+                    }
+                  >
+                    <SelectTrigger className="w-36" aria-label="Cantidad de choferes del ranking">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">Top 10</SelectItem>
+                      <SelectItem value="20">Top 20</SelectItem>
+                      <SelectItem value="all">Todos</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+                    onClick={exportDriverRatingRankingExcel}
+                    disabled={visibleDriverRatingRanking.length === 0}
+                  >
+                    <Download className="mr-1 h-4 w-4" /> Descargar Excel
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="border-brand-blue/25 text-brand-blue hover:bg-brand-blue-light"
+                    onClick={downloadDriverRatingRankingPdf}
+                    disabled={visibleDriverRatingRanking.length === 0}
+                  >
+                    <Download className="mr-1 h-4 w-4" /> Descargar PDF
+                  </Button>
+                </div>
+                {visibleDriverRatingRanking.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[640px] text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                          <th className="py-2 pr-3">Puesto</th>
+                          <th className="py-2 pr-3">Chofer</th>
+                          <th className="py-2 pr-3">Código</th>
+                          <th className="py-2 pr-3">Línea</th>
+                          <th className="py-2 pr-3">Promedio</th>
+                          <th className="py-2">Calificaciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {visibleDriverRatingRanking.map((driver, index) => (
+                          <tr key={driver.id}>
+                            <td className="py-2 pr-3 font-semibold">{index + 1}</td>
+                            <td className="py-2 pr-3">{driver.name}</td>
+                            <td className="py-2 pr-3">{driver.driverCode}</td>
+                            <td className="py-2 pr-3">{driver.transportLine}</td>
+                            <td className="py-2 pr-3">
+                              <span className="inline-flex items-center gap-1">
+                                <Star className="h-3.5 w-3.5 fill-current text-amber-500" />
+                                {driver.averageRating.toFixed(2)} / 5
+                              </span>
+                            </td>
+                            <td className="py-2">{driver.ratingCount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="rounded-md border p-4 text-center text-sm text-muted-foreground">
+                    No hay choferes con calificaciones para mostrar en el ranking.
+                  </p>
+                )}
+              </section>
             </div>
           ) : null}
         </DialogContent>
@@ -1965,6 +2224,129 @@ type TransactionSummary = {
   amount: number;
 };
 
+function styleReportWorksheet(XLSX: typeof XLSXStyle, sheet: XLSXStyle.WorkSheet) {
+  const reference = sheet["!ref"];
+  if (!reference) return;
+
+  const range = XLSX.utils.decode_range(reference);
+  const border = {
+    top: { style: "thin", color: { rgb: "CBD5E1" } },
+    bottom: { style: "thin", color: { rgb: "CBD5E1" } },
+    left: { style: "thin", color: { rgb: "CBD5E1" } },
+    right: { style: "thin", color: { rgb: "CBD5E1" } },
+  };
+  for (let row = range.s.r; row <= range.e.r; row += 1) {
+    for (let column = range.s.c; column <= range.e.c; column += 1) {
+      const address = XLSX.utils.encode_cell({ r: row, c: column });
+      const cell = sheet[address];
+      if (!cell) continue;
+      cell.s = {
+        border,
+        alignment: { vertical: "center", wrapText: true },
+        ...(row === range.s.r
+          ? {
+              font: { bold: true, color: { rgb: "FFFFFF" } },
+              fill: { patternType: "solid", fgColor: { rgb: "0758A5" } },
+              alignment: { vertical: "center", horizontal: "center", wrapText: true },
+            }
+          : {}),
+      };
+    }
+  }
+  sheet["!autofilter"] = { ref: reference };
+  sheet["!cols"] = Array.from({ length: range.e.c - range.s.c + 1 }, () => ({ wch: 20 }));
+  sheet["!rows"] = [{ hpt: 30 }];
+}
+
+type PdfTableColumn = { title: string; width: number };
+
+function drawBorderedPdfTable(
+  pdf: jsPDF,
+  columns: PdfTableColumn[],
+  rows: string[][],
+  options: { x: number; y: number; width: number; pageHeight: number; bottomMargin: number },
+) {
+  let y = options.y;
+  const weightTotal = columns.reduce((total, column) => total + column.width, 0);
+  const columnWidths = columns.map((column) => (options.width * column.width) / weightTotal);
+  const lineHeight = 3.5;
+  const cellPadding = 2;
+
+  const drawRow = (values: string[], header: boolean) => {
+    pdf.setFont("helvetica", header ? "bold" : "normal");
+    pdf.setFontSize(header ? 7 : 6.5);
+    const linesByCell = values.map((value, index) =>
+      pdf.splitTextToSize(value || "—", columnWidths[index] - cellPadding * 2),
+    );
+    const maxLines = Math.max(1, ...linesByCell.map((lines) => lines.length));
+    const rowHeight = Math.max(7, maxLines * lineHeight + cellPadding * 2);
+    if (!header && y + rowHeight > options.pageHeight - options.bottomMargin) {
+      pdf.addPage();
+      y = 16;
+      drawRow(
+        columns.map((column) => column.title),
+        true,
+      );
+    }
+
+    let x = options.x;
+    for (let index = 0; index < columns.length; index += 1) {
+      const cellWidth = columnWidths[index];
+      pdf.setDrawColor(148, 163, 184);
+      pdf.setLineWidth(0.15);
+      if (header) pdf.setFillColor(232, 240, 250);
+      pdf.rect(x, y, cellWidth, rowHeight, header ? "FD" : "S");
+      pdf.setTextColor(17, 24, 39);
+      pdf.text(linesByCell[index], x + cellPadding, y + cellPadding + lineHeight * 0.75);
+      x += cellWidth;
+    }
+    y += rowHeight;
+  };
+
+  drawRow(
+    columns.map((column) => column.title),
+    true,
+  );
+  rows.forEach((row) => drawRow(row, false));
+  return y;
+}
+
+async function loadReportLogoDataUrl() {
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("No se pudo cargar el logo de Pago Justo"));
+    image.src = "/icons/pasaje_qr_512x512.png";
+  });
+
+  const canvas = globalThis.document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("No se pudo preparar el logo para el PDF");
+  context.drawImage(image, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+async function addReportPdfHeader(pdf: jsPDF, title: string, metadata: string) {
+  const logo = await loadReportLogoDataUrl();
+  const margins = 14;
+  pdf.addImage(logo, "PNG", margins, 8, 14, 14);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(15);
+  pdf.setTextColor(7, 71, 131);
+  pdf.text("QR Pago Justo", margins + 19, 17);
+  pdf.setFontSize(12);
+  pdf.setTextColor(17, 24, 39);
+  pdf.text(title, margins, 29);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(8);
+  pdf.setTextColor(71, 85, 105);
+  pdf.text(metadata, margins, 35);
+  pdf.setTextColor(17, 24, 39);
+  return 41;
+}
+
 function TransactionsPanel() {
   const { nombre } = useTarifas();
   const [chartOpen, setChartOpen] = useState(false);
@@ -2281,137 +2663,138 @@ function TransactionsPanel() {
   const generalSummaryRows = buildSummary(rows, "none");
   const summaryRows = buildSummary(filteredRows, breakdown);
 
-  function exportExcel() {
-    const sheet = XLSX.utils.json_to_sheet(
-      filteredRows.map((t) => ({
-        Fecha: new Date(t.created_at).toLocaleString(),
-        "Código validación": t.verification_code,
-        Pasajero: getDimensionName(t.passenger_id, t.passenger_id),
-        "Tipo de pasajero": profiles[t.passenger_id]?.category
-          ? nombre(profiles[t.passenger_id].category)
-          : "Sin tipo registrado",
-        Chofer: getDimensionName(t.driver_id, t.driver_id),
-        "Tarifas acompañantes extra": getCompanionFareTypes(t),
-        Pasajes: t.tickets,
-        "Monto (Bs)": Number(t.amount),
-        Latitud: t.latitude ?? "",
-        Longitud: t.longitude ?? "",
-        Mapa:
-          t.latitude != null && t.longitude != null
-            ? `https://www.google.com/maps?q=${t.latitude},${t.longitude}`
-            : "",
-      })),
-    );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, sheet, "Transacciones");
-    const summarySheet = XLSX.utils.json_to_sheet(
-      summaryRows.map((summary) => ({
-        Periodo: summary.period,
-        [breakdownLabel]: summary.dimension,
-        Transacciones: summary.transactions,
-        Pagos: summary.payments,
-        "Pagos acompañantes": summary.companionPayments,
-        "Monto (Bs)": Number(summary.amount.toFixed(2)),
-      })),
-    );
-    XLSX.utils.book_append_sheet(wb, summarySheet, "Resumen");
-    XLSX.writeFile(wb, `transacciones-${startDate || "inicio"}-${endDate || "actualidad"}.xlsx`);
-    toast.success("Reporte exportado");
+  async function exportExcel() {
+    try {
+      const XLSX = await import("xlsx-js-style");
+      const sheet = XLSX.utils.json_to_sheet(
+        filteredRows.map((t) => ({
+          Fecha: new Date(t.created_at).toLocaleString(),
+          "Código validación": t.verification_code,
+          Pasajero: getDimensionName(t.passenger_id, t.passenger_id),
+          "Tipo de pasajero": profiles[t.passenger_id]?.category
+            ? nombre(profiles[t.passenger_id].category)
+            : "Sin tipo registrado",
+          Chofer: getDimensionName(t.driver_id, t.driver_id),
+          "Tarifas acompañantes extra": getCompanionFareTypes(t),
+          Pasajes: t.tickets,
+          "Monto (Bs)": Number(t.amount),
+          Latitud: t.latitude ?? "",
+          Longitud: t.longitude ?? "",
+          Mapa:
+            t.latitude != null && t.longitude != null
+              ? `https://www.google.com/maps?q=${t.latitude},${t.longitude}`
+              : "",
+        })),
+      );
+      styleReportWorksheet(XLSX, sheet);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, sheet, "Transacciones");
+      const summarySheet = XLSX.utils.json_to_sheet(
+        summaryRows.map((summary) => ({
+          Periodo: summary.period,
+          [breakdownLabel]: summary.dimension,
+          Transacciones: summary.transactions,
+          Pagos: summary.payments,
+          "Pagos acompañantes": summary.companionPayments,
+          "Monto (Bs)": Number(summary.amount.toFixed(2)),
+        })),
+      );
+      styleReportWorksheet(XLSX, summarySheet);
+      XLSX.utils.book_append_sheet(wb, summarySheet, "Resumen");
+      XLSX.writeFile(wb, `transacciones-${startDate || "inicio"}-${endDate || "actualidad"}.xlsx`);
+      toast.success("Reporte exportado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo exportar el reporte");
+    }
   }
 
-  function exportSummaryExcel(
-    rowsToExport: TransactionSummary[],
-    title: string,
-    includeDimension: boolean,
-  ) {
-    const sheet = XLSX.utils.json_to_sheet(
-      rowsToExport.map((summary) => ({
-        Periodo: summary.period,
-        ...(includeDimension ? { [breakdownLabel]: summary.dimension } : {}),
-        Transacciones: summary.transactions,
-        Pagos: summary.payments,
-        "Pagos acompañantes": summary.companionPayments,
-        "Monto (Bs)": Number(summary.amount.toFixed(2)),
-      })),
-    );
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, "Resumen");
-    XLSX.writeFile(
-      workbook,
-      `${title.toLocaleLowerCase("es").replace(/\s+/g, "-")}-${startDate || "inicio"}-${endDate || "actualidad"}.xlsx`,
-    );
-    toast.success(`${title} exportado a Excel`);
-  }
-
-  function exportSummaryPdf(
+  async function exportSummaryExcel(
     rowsToExport: TransactionSummary[],
     title: string,
     includeDimension: boolean,
   ) {
     try {
-      const document = new jsPDF({ orientation: "landscape" });
-      const pageHeight = document.internal.pageSize.getHeight();
-      const pageWidth = document.internal.pageSize.getWidth();
+      const XLSX = await import("xlsx-js-style");
+      const sheet = XLSX.utils.json_to_sheet(
+        rowsToExport.map((summary) => ({
+          Periodo: summary.period,
+          ...(includeDimension ? { [breakdownLabel]: summary.dimension } : {}),
+          Transacciones: summary.transactions,
+          Pagos: summary.payments,
+          "Pagos acompañantes": summary.companionPayments,
+          "Monto (Bs)": Number(summary.amount.toFixed(2)),
+        })),
+      );
+      styleReportWorksheet(XLSX, sheet);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, sheet, "Resumen");
+      XLSX.writeFile(
+        workbook,
+        `${title.toLocaleLowerCase("es").replace(/\s+/g, "-")}-${startDate || "inicio"}-${endDate || "actualidad"}.xlsx`,
+      );
+      toast.success(`${title} exportado a Excel`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `No se pudo exportar ${title}`);
+    }
+  }
+
+  async function exportSummaryPdf(
+    rowsToExport: TransactionSummary[],
+    title: string,
+    includeDimension: boolean,
+  ) {
+    try {
+      const pdf = new jsPDF({ orientation: "landscape" });
       const columns = [
-        { title: "Periodo", getValue: (summary: TransactionSummary) => summary.period },
+        { title: "Periodo", width: 1.8, getValue: (summary: TransactionSummary) => summary.period },
         ...(includeDimension
           ? [
               {
                 title: breakdownLabel,
+                width: 1.8,
                 getValue: (summary: TransactionSummary) => summary.dimension,
               },
             ]
           : []),
         {
           title: "Transacciones",
+          width: 1,
           getValue: (summary: TransactionSummary) => String(summary.transactions),
         },
-        { title: "Pagos", getValue: (summary: TransactionSummary) => String(summary.payments) },
+        {
+          title: "Pagos",
+          width: 0.8,
+          getValue: (summary: TransactionSummary) => String(summary.payments),
+        },
         {
           title: "Pagos acompañantes",
+          width: 1.3,
           getValue: (summary: TransactionSummary) => String(summary.companionPayments),
         },
         {
           title: "Monto (Bs)",
+          width: 1,
           getValue: (summary: TransactionSummary) => summary.amount.toFixed(2),
         },
       ];
-      const positions = columns.map((_, index) => 14 + (pageWidth - 28) * (index / columns.length));
-      let y = 18;
-      document.setFont("helvetica", "bold");
-      document.setFontSize(15);
-      document.text(title, 14, y);
-      document.setFont("helvetica", "normal");
-      document.setFontSize(9);
-      y += 8;
-      document.text(
+      const y = await addReportPdfHeader(
+        pdf,
+        title,
         `Periodo: ${startDate || "Sin fecha de inicio"} - ${endDate || "Sin fecha fin"} · Vista ${periodLabel.toLowerCase()}`,
-        14,
-        y,
       );
-      y += 10;
-
-      const writeHeader = () => {
-        document.setFont("helvetica", "bold");
-        document.setFontSize(8);
-        columns.forEach((column, index) => document.text(column.title, positions[index], y));
-        y += 6;
-        document.setFont("helvetica", "normal");
-      };
-      writeHeader();
-      for (const summary of rowsToExport) {
-        if (y > pageHeight - 14) {
-          document.addPage();
-          y = 18;
-          writeHeader();
-        }
-        document.setFontSize(8);
-        columns.forEach((column, index) =>
-          document.text(column.getValue(summary).slice(0, 30), positions[index], y),
-        );
-        y += 6;
-      }
-      document.save(
+      drawBorderedPdfTable(
+        pdf,
+        columns.map(({ title: columnTitle, width }) => ({ title: columnTitle, width })),
+        rowsToExport.map((summary) => columns.map((column) => column.getValue(summary))),
+        {
+          x: 14,
+          y,
+          width: pdf.internal.pageSize.getWidth() - 28,
+          pageHeight: pdf.internal.pageSize.getHeight(),
+          bottomMargin: 14,
+        },
+      );
+      pdf.save(
         `${title.toLocaleLowerCase("es").replace(/\s+/g, "-")}-${startDate || "inicio"}-${endDate || "actualidad"}.pdf`,
       );
       toast.success(`${title} exportado a PDF`);
@@ -2705,31 +3088,30 @@ function TransactionsPanel() {
     }
   }
 
-  function generatePdf() {
+  async function generatePdf() {
     try {
-      const document = new jsPDF({ orientation: "landscape" });
-      const pageWidth = document.internal.pageSize.getWidth();
-      const pageHeight = document.internal.pageSize.getHeight();
+      const pdf = new jsPDF({ orientation: "landscape" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
       const margins = 14;
-      let y = 16;
+      let y = await addReportPdfHeader(
+        pdf,
+        "Reporte de transacciones",
+        `Periodo: ${startDate || "Sin fecha de inicio"} - ${endDate || "Sin fecha fin"} · Vista ${periodLabel.toLowerCase()}`,
+      );
       const addPage = () => {
-        document.addPage();
+        pdf.addPage();
         y = 16;
       };
       const writeText = (text: string, x = margins, size = 9) => {
-        document.setFontSize(size);
-        const lines = document.splitTextToSize(text, pageWidth - margins * 2);
+        pdf.setFontSize(size);
+        const lines = pdf.splitTextToSize(text, pageWidth - margins * 2);
         if (y + lines.length * 5 > pageHeight - margins) addPage();
-        document.text(lines, x, y);
+        pdf.text(lines, x, y);
         y += lines.length * 5;
       };
 
-      document.setFont("helvetica", "bold");
-      writeText("Reporte de transacciones", margins, 16);
-      document.setFont("helvetica", "normal");
-      writeText(
-        `Periodo: ${startDate || "Sin fecha de inicio"} - ${endDate || "Sin fecha fin"} · Vista ${periodLabel.toLowerCase()}`,
-      );
+      pdf.setFont("helvetica", "normal");
       writeText(
         `${dimensionLabel}: ${selectedDimension ? profileName(selectedDimension, selectedDimension.id) : "General"} · Desglose: ${breakdownLabel}`,
       );
@@ -2738,44 +3120,53 @@ function TransactionsPanel() {
       );
       y += 4;
 
-      document.setFont("helvetica", "bold");
+      pdf.setFont("helvetica", "bold");
       writeText("Resumen", margins, 12);
-      document.setFont("helvetica", "normal");
-      for (const summary of summaryRows) {
-        writeText(
-          `${summary.period} | ${breakdownLabel}: ${summary.dimension} | Transacciones: ${summary.transactions} | Pagos: ${summary.payments} | Pagos acompañantes: ${summary.companionPayments} | Bs ${summary.amount.toFixed(2)}`,
-        );
-      }
+      y += 2;
+      y = drawBorderedPdfTable(
+        pdf,
+        [
+          { title: "Periodo", width: 2 },
+          { title: breakdownLabel, width: 1.8 },
+          { title: "Transacciones", width: 1 },
+          { title: "Pagos", width: 0.8 },
+          { title: "Pagos acompañantes", width: 1.3 },
+          { title: "Monto (Bs)", width: 1 },
+        ],
+        summaryRows.map((summary) => [
+          summary.period,
+          summary.dimension,
+          String(summary.transactions),
+          String(summary.payments),
+          String(summary.companionPayments),
+          summary.amount.toFixed(2),
+        ]),
+        {
+          x: margins,
+          y,
+          width: pageWidth - margins * 2,
+          pageHeight,
+          bottomMargin: margins,
+        },
+      );
 
-      y += 4;
-      document.setFont("helvetica", "bold");
+      y += 6;
+      pdf.setFont("helvetica", "bold");
       writeText("Detalle de transacciones", margins, 12);
-      const columns = [
-        { title: "Fecha", x: 14, max: 15 },
-        { title: "Código", x: 42, max: 12 },
-        { title: "Pasajero", x: 64, max: 20 },
-        { title: "Tipo", x: 98, max: 14 },
-        { title: "Chofer", x: 123, max: 20 },
-        { title: "Tarifas acompañantes", x: 157, max: 33 },
-        { title: "Pasajes", x: 218, max: 8 },
-        { title: "Monto Bs", x: 244, max: 17 },
-      ];
-      const writeTableHeader = () => {
-        document.setFont("helvetica", "bold");
-        document.setFontSize(8);
-        for (const column of columns) {
-          document.text(column.title, column.x, y);
-        }
-        y += 6;
-        document.setFont("helvetica", "normal");
-      };
-      writeTableHeader();
-      for (const transaction of filteredRows) {
-        if (y > pageHeight - margins) {
-          addPage();
-          writeTableHeader();
-        }
-        const values = [
+      y += 2;
+      drawBorderedPdfTable(
+        pdf,
+        [
+          { title: "Fecha", width: 1.2 },
+          { title: "Código", width: 0.7 },
+          { title: "Pasajero", width: 1.7 },
+          { title: "Tipo", width: 1 },
+          { title: "Chofer", width: 1.7 },
+          { title: "Tarifas acompañantes", width: 2.1 },
+          { title: "Pasajes", width: 0.5 },
+          { title: "Monto (Bs)", width: 0.9 },
+        ],
+        filteredRows.map((transaction) => [
           new Date(transaction.created_at).toLocaleDateString("es-BO"),
           transaction.verification_code,
           getDimensionName(transaction.passenger_id, transaction.passenger_id),
@@ -2786,16 +3177,16 @@ function TransactionsPanel() {
           getCompanionFareTypes(transaction),
           String(transaction.tickets),
           Number(transaction.amount).toFixed(2),
-        ];
-        document.setFontSize(7);
-        for (let index = 0; index < columns.length; index++) {
-          document.text(values[index].slice(0, columns[index].max), columns[index].x, y);
-        }
-        y += 5;
-      }
-      document.save(
-        `reporte-transacciones-${startDate || "inicio"}-${endDate || "actualidad"}.pdf`,
+        ]),
+        {
+          x: margins,
+          y,
+          width: pageWidth - margins * 2,
+          pageHeight,
+          bottomMargin: margins,
+        },
       );
+      pdf.save(`reporte-transacciones-${startDate || "inicio"}-${endDate || "actualidad"}.pdf`);
       toast.success("Reporte PDF generado");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo generar el reporte PDF");
