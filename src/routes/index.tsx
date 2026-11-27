@@ -117,31 +117,11 @@ function LoginForm() {
         if (!data) throw new Error("Teléfono no registrado");
         email = data as string;
       }
-      const { data: signInData, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
       if (error) throw error;
-
-      const { data: staff, error: statusError } = await supabase
-        .from("admins_supervisors")
-        .select("status")
-        .eq("id", signInData.user.id)
-        .maybeSingle();
-
-      if (statusError) {
-        await supabase.auth.signOut();
-        throw new Error("No se pudo verificar el estado de la cuenta. Inténtalo nuevamente.");
-      }
-
-      if (
-        String(staff?.status ?? "")
-          .trim()
-          .toLowerCase() === "suspended"
-      ) {
-        await supabase.auth.signOut();
-        throw new Error("Tu cuenta está suspendida. Contacta al administrador.");
-      }
 
       toast.success("Sesión iniciada");
     } catch (err) {
