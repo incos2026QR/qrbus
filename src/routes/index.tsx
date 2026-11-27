@@ -122,8 +122,6 @@ function LoginForm() {
         password,
       });
       if (error) throw error;
-
-      toast.success("Sesión iniciada");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al iniciar sesión");
     } finally {
