@@ -21,6 +21,7 @@ dist-ssr
 
 # Wrangler / Cloudflare
 .wrangler/
+.netlify/
 .dev.vars
 
 # Supabase CLI local cache
